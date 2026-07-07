@@ -14,6 +14,7 @@ type Theme = 'light' | 'dark';
 interface ThemeContextValue {
   theme: Theme;
   toggleTheme: () => void;
+  mounted: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
@@ -26,31 +27,37 @@ export function useTheme() {
 
 export default function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>('light');
+  const [mounted, setMounted] = useState(false);
 
-  // On mount, read saved preference or system preference
+  // Read saved preference or system preference on mount
   useEffect(() => {
     const saved = localStorage.getItem('garilelo-theme') as Theme | null;
-    if (saved === 'light' || saved === 'dark') {
-      setTheme(saved);
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      setTheme('dark');
-    }
+    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initialTheme = saved === 'light' || saved === 'dark'
+      ? saved
+      : systemPrefersDark ? 'dark' : 'light';
+
+    setTheme(initialTheme);
+
+    const root = document.documentElement;
+    root.classList.toggle('dark', initialTheme === 'dark');
+    setMounted(true);
   }, []);
 
-  // Sync <html> class + localStorage whenever theme changes
-  useEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('garilelo-theme', theme);
-  }, [theme]);
-
   const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+    setTheme((prev) => {
+      const next = prev === 'light' ? 'dark' : 'light';
+      const root = document.documentElement;
+      root.classList.toggle('dark', next === 'dark');
+      localStorage.setItem('garilelo-theme', next);
+      return next;
+    });
   }, []);
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, mounted }}>
       {children}
     </ThemeContext.Provider>
   );
 }
+

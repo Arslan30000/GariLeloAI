@@ -62,7 +62,7 @@ const NAV_LINKS: NavLink[] = [
 /* ── Component ──────────────────────────────────────────────────── */
 
 export default function Navbar() {
-  const { theme, toggleTheme } = useTheme();
+  const { theme, toggleTheme, mounted } = useTheme();
 
   return (
     <nav className="navbar" id="main-navbar">
@@ -94,9 +94,15 @@ export default function Navbar() {
           onClick={toggleTheme}
           className="theme-toggle"
           id="theme-toggle"
-          aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+          aria-label={mounted ? `Switch to ${theme === 'light' ? 'dark' : 'light'} mode` : 'Toggle theme'}
         >
-          {theme === 'light' ? <MoonIcon /> : <SunIcon />}
+          {!mounted ? (
+            <div style={{ width: 18, height: 18 }} />
+          ) : theme === 'light' ? (
+            <MoonIcon />
+          ) : (
+            <SunIcon />
+          )}
         </button>
       </div>
     </nav>

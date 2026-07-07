@@ -4,15 +4,17 @@ import { useState } from 'react';
 
 interface SearchBarProps {
   placeholder?: string;
+  query: string;
+  setQuery: (query: string) => void;
   onSearch?: (query: string) => void;
 }
 
 export default function SearchBar({
   placeholder = 'e.g., Automatic Honda Civic under 40 lac in Islamabad...',
+  query,
+  setQuery,
   onSearch,
 }: SearchBarProps) {
-  const [query, setQuery] = useState('');
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSearch?.(query);

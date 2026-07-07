@@ -6,11 +6,13 @@ import type { QuickFilter } from '../types';
 
 interface HeroProps {
   quickFilters: QuickFilter[];
+  query: string;
+  setQuery: (query: string) => void;
   onSearch?: (query: string) => void;
   onFilterClick?: (filter: QuickFilter) => void;
 }
 
-export default function Hero({ quickFilters, onSearch, onFilterClick }: HeroProps) {
+export default function Hero({ quickFilters, query, setQuery, onSearch, onFilterClick }: HeroProps) {
   return (
     <section className="hero" id="hero-section">
       {/* Platform banner */}
@@ -33,7 +35,7 @@ export default function Hero({ quickFilters, onSearch, onFilterClick }: HeroProp
       </p>
 
       {/* Search */}
-      <SearchBar onSearch={onSearch} />
+      <SearchBar query={query} setQuery={setQuery} onSearch={onSearch} />
 
       {/* Quick filters */}
       <QuickFilters filters={quickFilters} onFilterClick={onFilterClick} />
