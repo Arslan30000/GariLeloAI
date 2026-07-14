@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import type { CarListing } from '../types';
 
 interface CarCardProps {
@@ -30,10 +29,11 @@ function sourceClass(source: CarListing['source']): string {
 }
 
 export default function CarCard({ car, onViewDeal, onToggleFavorite }: CarCardProps) {
-  const [isFav, setIsFav] = useState(car.isFavorite ?? false);
+  // Read isFavorite directly from the prop so the card always reflects
+  // the parent's authoritative favorites list (no stale useState).
+  const isFav = car.isFavorite ?? false;
 
   const handleFav = () => {
-    setIsFav((prev) => !prev);
     onToggleFavorite?.(car);
   };
 

@@ -10,9 +10,10 @@ interface HeroProps {
   setQuery: (query: string) => void;
   onSearch?: (query: string) => void;
   onFilterClick?: (filter: QuickFilter) => void;
+  isSearching?: boolean;
 }
 
-export default function Hero({ quickFilters, query, setQuery, onSearch, onFilterClick }: HeroProps) {
+export default function Hero({ quickFilters, query, setQuery, onSearch, onFilterClick, isSearching }: HeroProps) {
   return (
     <section className="hero" id="hero-section">
       {/* Platform banner */}
@@ -35,7 +36,12 @@ export default function Hero({ quickFilters, query, setQuery, onSearch, onFilter
       </p>
 
       {/* Search */}
-      <SearchBar query={query} setQuery={setQuery} onSearch={onSearch} />
+      <SearchBar
+        query={query}
+        setQuery={setQuery}
+        onSearch={onSearch}
+        isSearching={isSearching}
+      />
 
       {/* Quick filters */}
       <QuickFilters filters={quickFilters} onFilterClick={onFilterClick} />

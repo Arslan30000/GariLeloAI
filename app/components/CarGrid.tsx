@@ -8,33 +8,36 @@ interface CarGridProps {
   cars: CarListing[];
   onViewDeal?: (car: CarListing) => void;
   onToggleFavorite?: (car: CarListing) => void;
+  isLoading?: boolean;
+  hasSearched?: boolean;
 }
 
 const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: 'relevance',  label: 'Relevance' },
-  { value: 'price-asc',  label: 'Price: Low → High' },
-  { value: 'price-desc', label: 'Price: High → Low' },
-  { value: 'year-desc',  label: 'Year: Newest' },
+  { value: 'relevance',   label: 'Relevance' },
+  { value: 'price-asc',   label: 'Price: Low → High' },
+  { value: 'price-desc',  label: 'Price: High → Low' },
+  { value: 'year-desc',   label: 'Year: Newest' },
   { value: 'mileage-asc', label: 'Mileage: Lowest' },
 ];
 
 function sortCars(cars: CarListing[], sort: SortOption): CarListing[] {
   const copy = [...cars];
   switch (sort) {
-    case 'price-asc':
-      return copy.sort((a, b) => a.price - b.price);
-    case 'price-desc':
-      return copy.sort((a, b) => b.price - a.price);
-    case 'year-desc':
-      return copy.sort((a, b) => b.year - a.year);
-    case 'mileage-asc':
-      return copy.sort((a, b) => a.mileage - b.mileage);
-    default:
-      return copy;
+    case 'price-asc':   return copy.sort((a, b) => a.price - b.price);
+    case 'price-desc':  return copy.sort((a, b) => b.price - a.price);
+    case 'year-desc':   return copy.sort((a, b) => b.year - a.year);
+    case 'mileage-asc': return copy.sort((a, b) => a.mileage - b.mileage);
+    default:            return copy;
   }
 }
 
-export default function CarGrid({ cars, onViewDeal, onToggleFavorite }: CarGridProps) {
+export default function CarGrid({
+  cars,
+  onViewDeal,
+  onToggleFavorite,
+  isLoading = false,
+  hasSearched = false,
+}: CarGridProps) {
   const [sortBy, setSortBy] = useState<SortOption>('relevance');
   const sorted = sortCars(cars, sortBy);
 
@@ -43,7 +46,14 @@ export default function CarGrid({ cars, onViewDeal, onToggleFavorite }: CarGridP
       {/* ── Header row ─────────────────────────────────────── */}
       <div className="car-grid-header">
         <p className="car-grid-count">
-          <strong>{cars.length}</strong> cars found
+          {isLoading ? (
+            <span>Searching with AI…</span>
+          ) : (
+            <>
+              <strong>{cars.length}</strong>{' '}
+              {hasSearched ? 'results found' : 'cars featured'}
+            </>
+          )}
         </p>
 
         <div className="car-grid-sort">
@@ -54,6 +64,7 @@ export default function CarGrid({ cars, onViewDeal, onToggleFavorite }: CarGridP
             id="sort-select"
             className="car-grid-sort-select"
             value={sortBy}
+            disabled={isLoading}
             onChange={(e) => setSortBy(e.target.value as SortOption)}
           >
             {SORT_OPTIONS.map((opt) => (
@@ -66,7 +77,12 @@ export default function CarGrid({ cars, onViewDeal, onToggleFavorite }: CarGridP
       </div>
 
       {/* ── Grid ───────────────────────────────────────────── */}
-      {sorted.length > 0 ? (
+      {isLoading ? (
+        <div className="car-grid-loading" id="car-grid-loading" aria-live="polite">
+          <div className="spinner-large" aria-hidden="true" />
+          <p>Our AI is analysing your query…</p>
+        </div>
+      ) : sorted.length > 0 ? (
         <div className="car-grid" id="car-grid">
           {sorted.map((car) => (
             <CarCard

@@ -16,7 +16,7 @@ const QUICK_FILTERS: QuickFilter[] = [
   { id: 'civic-isl', label: 'Honda Civic Islamabad',  query: 'Honda Civic Islamabad' },
 ];
 
-/* ── Sample cars (populated with Pakistani car details and external links only) ──── */
+/* ── Sample cars shown on first load (before any search is run) ── */
 const SAMPLE_CARS: CarListing[] = [
   {
     id: '1',
@@ -145,120 +145,144 @@ const SAMPLE_CARS: CarListing[] = [
     imageUrl: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&q=80&w=600',
     aiScore: 94,
     dealRating: 'Great Deal',
-  }
+  },
 ];
+
+/** Normalize a Supabase car row into the CarListing shape used by the UI. */
+function normalizeApiCar(raw: Record<string, unknown>, index: number): CarListing {
+  const price = Number(raw.price ?? 0);
+  const mileage = Number(raw.mileage ?? 0);
+
+  const priceFormatted =
+    price >= 10_000_000
+      ? `PKR ${(price / 10_000_000).toFixed(2)}Cr`
+      : `PKR ${(price / 100_000).toFixed(2)}L`;
+
+  const mileageFormatted = `${mileage.toLocaleString('en-PK')} km`;
+
+  const validSources = ['OLX', 'PakWheels', 'CarFirst'];
+  const source = validSources.includes(String(raw.source))
+    ? (raw.source as CarListing['source'])
+    : 'Other';
+
+  return {
+    id: String(raw.id ?? `api-${index}`),
+    title: String(raw.title ?? `${raw.make ?? ''} ${raw.model ?? ''}`.trim()),
+    year: Number(raw.year ?? new Date().getFullYear()),
+    price,
+    priceFormatted,
+    mileage,
+    mileageFormatted,
+    transmission: raw.transmission === 'Manual' ? 'Manual' : 'Automatic',
+    fuelType: raw.fuel_type ? String(raw.fuel_type) : undefined,
+    city: String(raw.city ?? ''),
+    source,
+    sourceUrl: String(raw.source_url ?? raw.sourceUrl ?? '#'),
+    imageUrl: raw.image_url ? String(raw.image_url) : undefined,
+    aiScore: raw.ai_score != null ? Number(raw.ai_score) : undefined,
+    dealRating: (['Great Deal', 'Good Deal', 'Fair Deal'].includes(String(raw.deal_rating))
+      ? raw.deal_rating
+      : 'No Rating') as CarListing['dealRating'],
+  };
+}
 
 export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredCars, setFilteredCars] = useState<CarListing[]>(SAMPLE_CARS);
+  const [displayedCars, setDisplayedCars] = useState<CarListing[]>(SAMPLE_CARS);
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [hasSearched, setHasSearched] = useState(false);
 
-  // Load favorites from localStorage on mount
+  /* ── Persist favorites ─────────────────────────────────────── */
   useEffect(() => {
     const saved = localStorage.getItem('garilelo-favorites');
     if (saved) {
-      try {
-        setFavorites(JSON.parse(saved));
-      } catch (e) {
-        console.error(e);
-      }
+      try { setFavorites(JSON.parse(saved)); } catch { /* ignore */ }
     }
   }, []);
 
-  // Filter cars client-side whenever searchQuery or favorites list changes
-  const applyFilter = useCallback((query: string, favsList: string[]) => {
-    let result = [...SAMPLE_CARS];
+  /* ── Stamp isFavorite onto whichever list is displayed ──────── */
+  const stampFavorites = useCallback(
+    (cars: CarListing[], favsList: string[]) =>
+      cars.map((car) => ({ ...car, isFavorite: favsList.includes(car.id) })),
+    []
+  );
 
-    // Map favorites state onto the listing objects
-    result = result.map(car => ({
-      ...car,
-      isFavorite: favsList.includes(car.id)
-    }));
+  /* ── API search (calls Gemini → Supabase on the server) ─────── */
+  const handleSearch = useCallback(
+    async (query: string) => {
+      if (!query.trim()) {
+        setDisplayedCars(stampFavorites(SAMPLE_CARS, favorites));
+        setHasSearched(false);
+        setSearchError(null);
+        return;
+      }
 
-    if (query.trim()) {
-      const q = query.toLowerCase();
+      setIsSearching(true);
+      setSearchError(null);
+      setHasSearched(true);
 
-      // Simple keyword matching for standard requirements (AI-like parsing)
-      const isUnder30L = q.includes('under 30 lac') || q.includes('under 30l') || q.includes('under 30');
-      const isUnder50L = q.includes('under 50 lac') || q.includes('under 50l') || q.includes('under 50');
-      const isAutomatic = q.includes('automatic') || q.includes('auto');
-      const isManual = q.includes('manual');
-      const isLowMileage = q.includes('low mileage') || q.includes('mileage');
-      const isFuelEco = q.includes('fuel efficient') || q.includes('fuel eco') || q.includes('efficient') || q.includes('economy');
-      const isSUV = q.includes('suv') || q.includes('prado') || q.includes('sportage');
+      try {
+        const res = await fetch('/api/search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userQuery: query }),
+        });
 
-      result = result.filter((car) => {
-        // Price filters
-        if (isUnder30L && car.price > 3000000) return false;
-        if (isUnder50L && car.price > 5000000) return false;
+        const data = await res.json();
 
-        // Transmission filters
-        if (isAutomatic && car.transmission !== 'Automatic') return false;
-        if (isManual && car.transmission !== 'Manual') return false;
-
-        // Mileage filters
-        if (isLowMileage && car.mileage > 30000) return false;
-
-        // Fuel economy filters (Alto, Cultus, Swift)
-        if (isFuelEco && !['suzuki alto', 'suzuki cultus', 'suzuki swift'].some(model => car.title.toLowerCase().includes(model))) return false;
-
-        // SUV filter
-        if (isSUV && !['sportage', 'prado'].some(model => car.title.toLowerCase().includes(model))) return false;
-
-        // General text search (removes the keywords and searches title/city/source)
-        const cleanQuery = q
-          .replace('family car', '')
-          .replace('under 30 lac', '')
-          .replace('under 30l', '')
-          .replace('under 30', '')
-          .replace('under 50 lac', '')
-          .replace('under 50l', '')
-          .replace('under 50', '')
-          .replace('automatic', '')
-          .replace('manual', '')
-          .replace('low mileage', '')
-          .replace('fuel efficient', '')
-          .replace('efficient', '')
-          .replace('car', '')
-          .replace('suv', '')
-          .trim();
-
-        if (cleanQuery) {
-          const matchTitle = car.title.toLowerCase().includes(cleanQuery);
-          const matchCity = car.city.toLowerCase().includes(cleanQuery);
-          const matchSource = car.source.toLowerCase().includes(cleanQuery);
-          return matchTitle || matchCity || matchSource;
+        if (!res.ok) {
+          throw new Error(data?.error ?? `Server error (${res.status})`);
         }
 
-        return true;
-      });
-    }
+        const apiCars: CarListing[] = (data.results ?? []).map(
+          (raw: Record<string, unknown>, i: number) => normalizeApiCar(raw, i)
+        );
 
-    setFilteredCars(result);
-  }, []);
+        // If Supabase has no data yet, fall back to client-side filtered sample cars
+        if (apiCars.length === 0) {
+          const fallback = clientSideFilter(SAMPLE_CARS, query);
+          setDisplayedCars(stampFavorites(fallback, favorites));
+        } else {
+          setDisplayedCars(stampFavorites(apiCars, favorites));
+        }
+      } catch (err) {
+        console.error('Search error:', err);
+        const message = err instanceof Error ? err.message : 'Search failed.';
+        setSearchError(message);
+        // Still show client-side results so the page doesn't go blank
+        setDisplayedCars(stampFavorites(clientSideFilter(SAMPLE_CARS, query), favorites));
+      } finally {
+        setIsSearching(false);
+      }
+    },
+    [favorites, stampFavorites]
+  );
 
-  useEffect(() => {
-    applyFilter(searchQuery, favorites);
-  }, [searchQuery, favorites, applyFilter]);
+  /* ── Quick-filter chip click ─────────────────────────────────── */
+  const handleFilterClick = useCallback(
+    (filter: QuickFilter) => {
+      setSearchQuery(filter.query);
+      handleSearch(filter.query);
+    },
+    [handleSearch]
+  );
 
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-  };
-
-  const handleFilterClick = (filter: QuickFilter) => {
-    setSearchQuery(filter.query);
-  };
-
+  /* ── View deal ──────────────────────────────────────────────── */
   const handleViewDeal = (car: CarListing) => {
     window.open(car.sourceUrl, '_blank', 'noopener,noreferrer');
   };
 
+  /* ── Toggle favorite ────────────────────────────────────────── */
   const handleToggleFavorite = (car: CarListing) => {
     setFavorites((prev) => {
       const next = prev.includes(car.id)
         ? prev.filter((id) => id !== car.id)
         : [...prev, car.id];
       localStorage.setItem('garilelo-favorites', JSON.stringify(next));
+      // Re-stamp the currently displayed list
+      setDisplayedCars((cars) => stampFavorites(cars, next));
       return next;
     });
   };
@@ -273,14 +297,61 @@ export default function HomePage() {
           setQuery={setSearchQuery}
           onSearch={handleSearch}
           onFilterClick={handleFilterClick}
+          isSearching={isSearching}
         />
+
+        {/* Search status messages */}
+        {searchError && (
+          <div className="search-error-banner" role="alert">
+            ⚠ {searchError}
+          </div>
+        )}
+
         <CarGrid
-          cars={filteredCars}
+          cars={displayedCars}
           onViewDeal={handleViewDeal}
           onToggleFavorite={handleToggleFavorite}
+          isLoading={isSearching}
+          hasSearched={hasSearched}
         />
       </main>
       <Footer />
     </div>
   );
+}
+
+/* ── Client-side keyword filter (fallback when API has no data) ── */
+function clientSideFilter(cars: CarListing[], query: string): CarListing[] {
+  if (!query.trim()) return cars;
+  const q = query.toLowerCase();
+
+  const isUnder30L = /under\s*30/.test(q);
+  const isUnder50L = /under\s*50/.test(q);
+  const isAutomatic = q.includes('automatic') || q.includes('auto');
+  const isManual = q.includes('manual');
+  const isLowMileage = q.includes('low mileage') || q.includes('mileage');
+  const isFuelEco = q.includes('fuel efficient') || q.includes('efficient') || q.includes('economy');
+  const isSUV = q.includes('suv') || q.includes('prado') || q.includes('sportage');
+
+  return cars.filter((car) => {
+    if (isUnder30L && car.price > 3_000_000) return false;
+    if (isUnder50L && car.price > 5_000_000) return false;
+    if (isAutomatic && car.transmission !== 'Automatic') return false;
+    if (isManual && car.transmission !== 'Manual') return false;
+    if (isLowMileage && car.mileage > 30_000) return false;
+    if (isFuelEco && !['suzuki alto', 'suzuki cultus', 'suzuki swift'].some((m) => car.title.toLowerCase().includes(m))) return false;
+    if (isSUV && !['sportage', 'prado'].some((m) => car.title.toLowerCase().includes(m))) return false;
+
+    const cleanQ = q
+      .replace(/family\s*car|under\s*\d+\s*lac[s]?|under\s*\d+[lL]|automatic|manual|low\s*mileage|fuel\s*efficient|efficient|economy|suv|car/g, '')
+      .trim();
+    if (cleanQ) {
+      return (
+        car.title.toLowerCase().includes(cleanQ) ||
+        car.city.toLowerCase().includes(cleanQ) ||
+        car.source.toLowerCase().includes(cleanQ)
+      );
+    }
+    return true;
+  });
 }
