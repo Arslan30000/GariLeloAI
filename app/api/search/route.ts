@@ -42,7 +42,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 1. Gemini: extract structured filters ─────────────────────
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
       generationConfig: {
@@ -81,7 +80,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 2. Supabase: dynamically build query from non-null filters ─
     let dbQuery = supabase.from('cars').select('*');
 
     if (filters.make)         dbQuery = dbQuery.ilike('make', `%${filters.make}%`);
