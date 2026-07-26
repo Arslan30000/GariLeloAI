@@ -845,3 +845,58 @@ img {
   font-size: 14px;
   font-weight: 500;
 }
+
+/* ── AI Summary quote inside car card ───────────────────────────── */
+.car-card-ai-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 11.5px;
+  font-style: italic;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin: 4px 0 8px;
+  opacity: 0.85;
+}
+
+/* ── Overpriced deal badge ──────────────────────────────────────── */
+.car-card-deal.deal-over {
+  background: hsl(0, 80%, 95%);
+  color: hsl(0, 65%, 40%);
+  border: 1px solid hsl(0, 70%, 85%);
+}
+
+/* ── AI Feedback Banner ─────────────────────────────────────────── */
+.ai-feedback-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 1200px;
+  margin: 0 auto 16px;
+  padding: 10px 24px;
+}
+
+.ai-feedback-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.ai-feedback-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background: var(--brand-bg);
+  border: 1px solid hsl(var(--brand-hue), 60%, 82%);
+  border-radius: 20px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--brand-dark);
+  white-space: nowrap;
+}
+

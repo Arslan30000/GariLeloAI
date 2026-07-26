@@ -5,7 +5,7 @@ import Navbar from './Navbar';
 import Hero from './Hero';
 import CarGrid from './CarGrid';
 import Footer from './Footer';
-import type { CarListing, QuickFilter } from '../types';
+import type { CarListing, QuickFilter, SearchFilters } from '../types';
 
 /* ── Sample quick filters (driven by data, not hardcoded markup) ─ */
 const QUICK_FILTERS: QuickFilter[] = [
@@ -148,7 +148,7 @@ const SAMPLE_CARS: CarListing[] = [
   },
 ];
 
-/** Normalize a Supabase car row into the CarListing shape used by the UI. */
+/** Normalize a Supabase `cars` row into the CarListing shape used by the UI. */
 function normalizeApiCar(raw: Record<string, unknown>, index: number): CarListing {
   const price = Number(raw.price ?? 0);
   const mileage = Number(raw.mileage ?? 0);
@@ -160,14 +160,29 @@ function normalizeApiCar(raw: Record<string, unknown>, index: number): CarListin
 
   const mileageFormatted = `${mileage.toLocaleString('en-PK')} km`;
 
+  // Map source_platform to CarSource union
+  const platformRaw = String(raw.source_platform ?? raw.source ?? '');
   const validSources = ['OLX', 'PakWheels', 'CarFirst'];
-  const source = validSources.includes(String(raw.source))
-    ? (raw.source as CarListing['source'])
-    : 'Other';
+  const source = validSources.find((s) =>
+    platformRaw.toLowerCase().includes(s.toLowerCase())
+  ) as CarListing['source'] ?? 'Other';
+
+  // image_urls is TEXT[] in Supabase — take the first one
+  const imageUrls: string[] = Array.isArray(raw.image_urls)
+    ? (raw.image_urls as string[])
+    : [];
+  const imageUrl = imageUrls[0] ?? undefined;
+
+  // ai_label from Gemini (e.g. "Great Deal", "Overpriced") — also used as dealRating
+  const aiLabel = raw.ai_label ? String(raw.ai_label) : undefined;
+  const VALID_RATINGS = ['Great Deal', 'Good Deal', 'Fair Deal', 'Fair Price', 'Overpriced'];
+  const dealRating = VALID_RATINGS.includes(aiLabel ?? '')
+    ? (aiLabel as CarListing['dealRating'])
+    : 'No Rating';
 
   return {
     id: String(raw.id ?? `api-${index}`),
-    title: String(raw.title ?? `${raw.make ?? ''} ${raw.model ?? ''}`.trim()),
+    title: `${raw.make ?? ''} ${raw.model ?? ''}`.trim() || 'Unknown Car',
     year: Number(raw.year ?? new Date().getFullYear()),
     price,
     priceFormatted,
@@ -176,13 +191,20 @@ function normalizeApiCar(raw: Record<string, unknown>, index: number): CarListin
     transmission: raw.transmission === 'Manual' ? 'Manual' : 'Automatic',
     fuelType: raw.fuel_type ? String(raw.fuel_type) : undefined,
     city: String(raw.city ?? ''),
+    registeredIn: raw.registered_in ? String(raw.registered_in) : undefined,
+    engineCapacity: raw.engine_capacity ? Number(raw.engine_capacity) : undefined,
+    assembly: raw.assembly ? String(raw.assembly) : undefined,
+    color: raw.color ? String(raw.color) : undefined,
+    bodyType: raw.body_type ? String(raw.body_type) : undefined,
     source,
-    sourceUrl: String(raw.source_url ?? raw.sourceUrl ?? '#'),
-    imageUrl: raw.image_url ? String(raw.image_url) : undefined,
+    sourcePlatform: platformRaw || undefined,
+    sourceUrl: String(raw.url ?? '#'),          // DB column is `url` (the original listing URL)
+    imageUrl,
+    imageUrls: imageUrls.length ? imageUrls : undefined,
     aiScore: raw.ai_score != null ? Number(raw.ai_score) : undefined,
-    dealRating: (['Great Deal', 'Good Deal', 'Fair Deal'].includes(String(raw.deal_rating))
-      ? raw.deal_rating
-      : 'No Rating') as CarListing['dealRating'],
+    aiLabel,
+    aiSummary: raw.ai_summary ? String(raw.ai_summary) : undefined,
+    dealRating,
   };
 }
 
@@ -193,6 +215,7 @@ export default function HomePage() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [interpretedFilters, setInterpretedFilters] = useState<SearchFilters | null>(null);
 
   /* ── Persist favorites ─────────────────────────────────────── */
   useEffect(() => {
@@ -222,6 +245,7 @@ export default function HomePage() {
       setIsSearching(true);
       setSearchError(null);
       setHasSearched(true);
+      setInterpretedFilters(null);
 
       try {
         const res = await fetch('/api/search', {
@@ -234,6 +258,11 @@ export default function HomePage() {
 
         if (!res.ok) {
           throw new Error(data?.error ?? `Server error (${res.status})`);
+        }
+
+        // Store what Gemini understood so we can show the feedback banner
+        if (data.interpretedFilters) {
+          setInterpretedFilters(data.interpretedFilters as SearchFilters);
         }
 
         const apiCars: CarListing[] = (data.results ?? []).map(
@@ -251,6 +280,7 @@ export default function HomePage() {
         console.error('Search error:', err);
         const message = err instanceof Error ? err.message : 'Search failed.';
         setSearchError(message);
+        setInterpretedFilters(null);
         // Still show client-side results so the page doesn't go blank
         setDisplayedCars(stampFavorites(clientSideFilter(SAMPLE_CARS, query), favorites));
       } finally {
@@ -287,6 +317,22 @@ export default function HomePage() {
     });
   };
 
+  // Build non-null filter chips for the AI feedback banner
+  const filterChips = interpretedFilters
+    ? Object.entries(interpretedFilters)
+        .filter(([, v]) => v !== null)
+        .map(([k, v]) => {
+          const labels: Record<string, string> = {
+            make: '🚗', model: '📋', max_price: '💰',
+            city: '📍', transmission: '⚙️', color: '🎨',
+          };
+          const val = k === 'max_price'
+            ? `Under PKR ${Number(v).toLocaleString('en-PK')}`
+            : String(v);
+          return { key: k, label: `${labels[k] ?? ''} ${val}`.trim() };
+        })
+    : [];
+
   return (
     <div className="app-shell">
       <Navbar />
@@ -300,7 +346,17 @@ export default function HomePage() {
           isSearching={isSearching}
         />
 
-        {/* Search status messages */}
+        {/* AI Feedback Banner — shows what Gemini understood */}
+        {filterChips.length > 0 && !isSearching && (
+          <div className="ai-feedback-banner" role="status" aria-live="polite">
+            <span className="ai-feedback-label">AI understood:</span>
+            {filterChips.map(({ key, label }) => (
+              <span key={key} className="ai-feedback-chip">{label}</span>
+            ))}
+          </div>
+        )}
+
+        {/* Search error message */}
         {searchError && (
           <div className="search-error-banner" role="alert">
             ⚠ {searchError}

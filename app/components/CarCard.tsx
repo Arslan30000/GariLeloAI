@@ -8,14 +8,14 @@ interface CarCardProps {
   onToggleFavorite?: (car: CarListing) => void;
 }
 
-/* ── Helper: deal rating → CSS modifier class ─────────────────── */
-function dealClass(rating: CarListing['dealRating']): string {
-  switch (rating) {
-    case 'Great Deal': return 'deal-great';
-    case 'Good Deal':  return 'deal-good';
-    case 'Fair Deal':  return 'deal-fair';
-    default:           return 'deal-none';
-  }
+/* ── Helper: ai_label / dealRating → CSS modifier class ──────── */
+function dealClass(label: string | undefined, rating: CarListing['dealRating']): string {
+  const value = (label ?? rating ?? '').toLowerCase();
+  if (value.includes('great'))     return 'deal-great';
+  if (value.includes('good'))      return 'deal-good';
+  if (value.includes('fair'))      return 'deal-fair';
+  if (value.includes('overpriced')) return 'deal-over';
+  return 'deal-none';
 }
 
 /* ── Helper: source → badge class ─────────────────────────────── */
@@ -32,6 +32,11 @@ export default function CarCard({ car, onViewDeal, onToggleFavorite }: CarCardPr
   // Read isFavorite directly from the prop so the card always reflects
   // the parent's authoritative favorites list (no stale useState).
   const isFav = car.isFavorite ?? false;
+
+  // Prefer the Gemini-generated label from the DB; fall back to dealRating
+  const displayLabel = car.aiLabel ?? (car.dealRating !== 'No Rating' ? car.dealRating : null);
+  // Use ai_score (1–10 from scraper) — convert to display format
+  const scoreDisplay = car.aiScore != null ? car.aiScore : null;
 
   const handleFav = () => {
     onToggleFavorite?.(car);
@@ -70,12 +75,12 @@ export default function CarCard({ car, onViewDeal, onToggleFavorite }: CarCardPr
         </button>
 
         {/* AI Score badge */}
-        {car.aiScore != null && (
+        {scoreDisplay != null && (
           <span className="car-card-ai-score">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12 2L9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2z" />
             </svg>
-            {car.aiScore}
+            {scoreDisplay}
           </span>
         )}
       </div>
@@ -86,15 +91,27 @@ export default function CarCard({ car, onViewDeal, onToggleFavorite }: CarCardPr
           {car.title} <span className="car-card-year">{car.year}</span>
         </h3>
 
+        {/* Price row with AI deal label */}
         <div className="car-card-price-row">
           <span className="car-card-price">{car.priceFormatted}</span>
-          {car.dealRating !== 'No Rating' && (
-            <span className={`car-card-deal ${dealClass(car.dealRating)}`}>
-              {car.dealRating === 'Great Deal' && '●'} {car.dealRating}
+          {displayLabel && (
+            <span className={`car-card-deal ${dealClass(car.aiLabel, car.dealRating)}`}>
+              {displayLabel.includes('Great') && '● '}{displayLabel}
             </span>
           )}
         </div>
 
+        {/* AI one-line summary from Gemini (only when scraped from DB) */}
+        {car.aiSummary && (
+          <p className="car-card-ai-summary">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" style={{ marginRight: 4, opacity: 0.7, flexShrink: 0 }}>
+              <path d="M12 2L9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2z" />
+            </svg>
+            {car.aiSummary}
+          </p>
+        )}
+
+        {/* Meta row */}
         <div className="car-card-meta">
           <span className="car-card-meta-item">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -116,6 +133,16 @@ export default function CarCard({ car, onViewDeal, onToggleFavorite }: CarCardPr
             </svg>
             {car.city}
           </span>
+          {car.engineCapacity && (
+            <span className="car-card-meta-item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="7" width="20" height="14" rx="2" />
+                <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+                <line x1="12" y1="12" x2="12" y2="16" />
+              </svg>
+              {car.engineCapacity}cc
+            </span>
+          )}
         </div>
 
         <a

@@ -1,0 +1,38 @@
+name: Scrape PakWheels listings
+
+on:
+  # Runs at 02:00 UTC (07:00 PKT) and 14:00 UTC (19:00 PKT) every day
+  schedule:
+    - cron: '0 2,14 * * *'
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    name: Run PakWheels Scraper
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      GEMINI_API_KEY:            ${{ secrets.GEMINI_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium browser
+        run: python -m playwright install chromium --with-deps
+
+      - name: Run scraper
+        run: python scraper.py

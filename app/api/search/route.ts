@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
+import type { SearchFilters } from '../../types';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,15 +22,6 @@ function sanitizeGeminiJson(raw: string): string {
     .trim();
 }
 
-interface SearchFilters {
-  make: string | null;
-  model: string | null;
-  max_price: number | null;
-  city: string | null;
-  transmission: 'Automatic' | 'Manual' | null;
-  color: string | null;
-}
-
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -42,6 +34,7 @@ export async function POST(req: Request) {
       );
     }
 
+    // ── 1. Gemini: translate natural language → structured JSON filters ─
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
       generationConfig: {
@@ -50,20 +43,24 @@ export async function POST(req: Request) {
     });
 
     const prompt = `
-      You are an expert car search assistant for the Pakistani market.
-      Extract the specific search filters from this user query: "${userQuery}"
+      You are an expert car search assistant for the Pakistani used-car market.
+      Extract structured search filters from this query: "${userQuery}"
 
-      Return ONLY a valid JSON object with these exact keys (use null if the user doesn't mention it):
+      Return ONLY a valid JSON object with exactly these keys (null if not mentioned):
       {
-        "make": "string or null (e.g., Honda, Toyota, Suzuki)",
-        "model": "string or null (e.g., Civic, Corolla, Cultus)",
-        "max_price": "number or null in PKR (e.g., convert '40 lacs' to 4000000)",
-        "city": "string or null (e.g., Rawalpindi, Islamabad)",
-        "transmission": "string or null (strictly 'Automatic' or 'Manual')",
-        "color": "string or null (e.g., White, Black)"
+        "make": string | null,         // e.g. "Honda", "Toyota", "Suzuki", "Kia"
+        "model": string | null,        // e.g. "Civic", "Corolla", "Cultus", "Sportage"
+        "max_price": number | null,    // in PKR — convert "40 lacs" → 4000000, "1 crore" → 10000000
+        "city": string | null,         // e.g. "Rawalpindi", "Islamabad", "Lahore", "Karachi"
+        "transmission": string | null, // STRICTLY "Automatic" or "Manual" only
+        "color": string | null         // e.g. "White", "Black", "Silver", "Red"
       }
 
-      Do NOT include any explanatory text — output only the JSON object.
+      Rules:
+      - Output ONLY the JSON — no markdown, no explanation.
+      - Normalise make/model to proper case (e.g. "honda" → "Honda").
+      - If the user says "auto" treat it as "Automatic".
+      - If the user says "Pindi" or "pindi" treat city as "Rawalpindi".
     `;
 
     let filters: SearchFilters;
@@ -80,18 +77,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // ── 2. Supabase: dynamic query built from non-null filters ──────────
     let dbQuery = supabase.from('cars').select('*');
 
-    if (filters.make)         dbQuery = dbQuery.ilike('make', `%${filters.make}%`);
-    if (filters.model)        dbQuery = dbQuery.ilike('model', `%${filters.model}%`);
+    if (filters.make)              dbQuery = dbQuery.ilike('make', `%${filters.make}%`);
+    if (filters.model)             dbQuery = dbQuery.ilike('model', `%${filters.model}%`);
     if (filters.max_price != null) dbQuery = dbQuery.lte('price', filters.max_price);
-    if (filters.city)         dbQuery = dbQuery.ilike('city', `%${filters.city}%`);
-    if (filters.transmission) dbQuery = dbQuery.ilike('transmission', `%${filters.transmission}%`);
-    if (filters.color)        dbQuery = dbQuery.ilike('color', `%${filters.color}%`);
+    if (filters.city)              dbQuery = dbQuery.ilike('city', `%${filters.city}%`);
+    if (filters.transmission)      dbQuery = dbQuery.ilike('transmission', `%${filters.transmission}%`);
+    if (filters.color)             dbQuery = dbQuery.ilike('color', `%${filters.color}%`);
 
+    // Sort: best AI-scored deals first, then cheapest
     const { data: cars, error: dbError } = await dbQuery
+      .order('ai_score', { ascending: false, nullsFirst: false })
       .order('price', { ascending: true })
-      .limit(20);
+      .limit(24);
 
     if (dbError) {
       console.error('Supabase query error:', dbError);
@@ -101,7 +101,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 3. Return results ──────────────────────────────────────────
+    // ── 3. Return results + interpreted filters for AI feedback UI ──────
     return NextResponse.json({
       interpretedFilters: filters,
       results: cars ?? [],
