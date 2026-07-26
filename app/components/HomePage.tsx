@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Navbar from './Navbar';
 import Hero from './Hero';
 import CarGrid from './CarGrid';
@@ -16,137 +16,7 @@ const QUICK_FILTERS: QuickFilter[] = [
   { id: 'civic-isl', label: 'Honda Civic Islamabad',  query: 'Honda Civic Islamabad' },
 ];
 
-/* ── Sample cars shown on first load (before any search is run) ── */
-const SAMPLE_CARS: CarListing[] = [
-  {
-    id: '1',
-    title: 'Suzuki Swift GLX',
-    year: 2023,
-    price: 3450000,
-    priceFormatted: 'PKR 34.50L',
-    mileage: 1800,
-    mileageFormatted: '1,800 km',
-    transmission: 'Automatic',
-    city: 'Lahore',
-    source: 'OLX',
-    sourceUrl: 'https://www.olx.com.pk/item/suzuki-swift-glx-2023-iid-108920112',
-    imageUrl: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&q=80&w=600',
-    aiScore: 95,
-    dealRating: 'Great Deal',
-  },
-  {
-    id: '2',
-    title: 'Honda Civic Oriel',
-    year: 2021,
-    price: 6800000,
-    priceFormatted: 'PKR 68.00L',
-    mileage: 42000,
-    mileageFormatted: '42,000 km',
-    transmission: 'Automatic',
-    city: 'Islamabad',
-    source: 'PakWheels',
-    sourceUrl: 'https://www.pakwheels.com/used-cars/honda-civic-2021-for-sale-in-islamabad',
-    imageUrl: 'https://images.unsplash.com/photo-1617788138017-80ad40651399?auto=format&fit=crop&q=80&w=600',
-    aiScore: 89,
-    dealRating: 'Good Deal',
-  },
-  {
-    id: '3',
-    title: 'Suzuki Alto VXR',
-    year: 2022,
-    price: 2300000,
-    priceFormatted: 'PKR 23.00L',
-    mileage: 28000,
-    mileageFormatted: '28,000 km',
-    transmission: 'Manual',
-    city: 'Karachi',
-    source: 'OLX',
-    sourceUrl: 'https://www.olx.com.pk/item/suzuki-alto-vxr-2022-iid-108930492',
-    imageUrl: 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&q=80&w=600',
-    aiScore: 92,
-    dealRating: 'Great Deal',
-  },
-  {
-    id: '4',
-    title: 'Kia Sportage AWD',
-    year: 2022,
-    price: 7400000,
-    priceFormatted: 'PKR 74.00L',
-    mileage: 25000,
-    mileageFormatted: '25,000 km',
-    transmission: 'Automatic',
-    city: 'Islamabad',
-    source: 'CarFirst',
-    sourceUrl: 'https://carfirst.com/buy-car/kia-sportage-2022',
-    imageUrl: 'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?auto=format&fit=crop&q=80&w=600',
-    aiScore: 82,
-    dealRating: 'Fair Deal',
-  },
-  {
-    id: '5',
-    title: 'Toyota Corolla Altis Grande',
-    year: 2022,
-    price: 5900000,
-    priceFormatted: 'PKR 59.00L',
-    mileage: 18500,
-    mileageFormatted: '18,500 km',
-    transmission: 'Automatic',
-    city: 'Lahore',
-    source: 'PakWheels',
-    sourceUrl: 'https://www.pakwheels.com/used-cars/toyota-corolla-2022-for-sale-in-lahore',
-    imageUrl: 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?auto=format&fit=crop&q=80&w=600',
-    aiScore: 88,
-    dealRating: 'Good Deal',
-  },
-  {
-    id: '6',
-    title: 'Toyota Yaris Ativ X',
-    year: 2021,
-    price: 4500000,
-    priceFormatted: 'PKR 45.00L',
-    mileage: 35000,
-    mileageFormatted: '35,000 km',
-    transmission: 'Automatic',
-    city: 'Karachi',
-    source: 'PakWheels',
-    sourceUrl: 'https://www.pakwheels.com/used-cars/toyota-yaris-2021-for-sale-in-karachi',
-    imageUrl: 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?auto=format&fit=crop&q=80&w=600',
-    aiScore: 91,
-    dealRating: 'Good Deal',
-  },
-  {
-    id: '7',
-    title: 'Toyota Prado TX',
-    year: 2018,
-    price: 19500000,
-    priceFormatted: 'PKR 1.95Cr',
-    mileage: 88000,
-    mileageFormatted: '88,000 km',
-    transmission: 'Automatic',
-    city: 'Islamabad',
-    source: 'OLX',
-    sourceUrl: 'https://www.olx.com.pk/item/toyota-prado-tx-2018-iid-108940582',
-    imageUrl: 'https://images.unsplash.com/photo-1511919884226-fd3cad34687c?auto=format&fit=crop&q=80&w=600',
-    aiScore: 78,
-    dealRating: 'Fair Deal',
-  },
-  {
-    id: '8',
-    title: 'Suzuki Cultus VXL',
-    year: 2020,
-    price: 2850000,
-    priceFormatted: 'PKR 28.50L',
-    mileage: 55000,
-    mileageFormatted: '55,000 km',
-    transmission: 'Manual',
-    city: 'Karachi',
-    source: 'OLX',
-    sourceUrl: 'https://www.olx.com.pk/item/suzuki-cultus-vxl-2020-iid-108950183',
-    imageUrl: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&q=80&w=600',
-    aiScore: 94,
-    dealRating: 'Great Deal',
-  },
-];
+
 
 /** Normalize a Supabase `cars` row into the CarListing shape used by the UI. */
 function normalizeApiCar(raw: Record<string, unknown>, index: number): CarListing {
@@ -210,7 +80,7 @@ function normalizeApiCar(raw: Record<string, unknown>, index: number): CarListin
 
 export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [displayedCars, setDisplayedCars] = useState<CarListing[]>(SAMPLE_CARS);
+  const [displayedCars, setDisplayedCars] = useState<CarListing[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -225,20 +95,20 @@ export default function HomePage() {
     }
   }, []);
 
-  /* ── Stamp isFavorite onto whichever list is displayed ──────── */
-  const stampFavorites = useCallback(
-    (cars: CarListing[], favsList: string[]) =>
-      cars.map((car) => ({ ...car, isFavorite: favsList.includes(car.id) })),
-    []
+  /* ── Stamp isFavorite onto the displayed list ───────────────── */
+  const carsWithFavorites = useMemo(
+    () => displayedCars.map((car) => ({ ...car, isFavorite: favorites.includes(car.id) })),
+    [displayedCars, favorites]
   );
 
   /* ── API search (calls Gemini → Supabase on the server) ─────── */
   const handleSearch = useCallback(
     async (query: string) => {
       if (!query.trim()) {
-        setDisplayedCars(stampFavorites(SAMPLE_CARS, favorites));
+        setDisplayedCars([]);
         setHasSearched(false);
         setSearchError(null);
+        setInterpretedFilters(null);
         return;
       }
 
@@ -260,7 +130,6 @@ export default function HomePage() {
           throw new Error(data?.error ?? `Server error (${res.status})`);
         }
 
-        // Store what Gemini understood so we can show the feedback banner
         if (data.interpretedFilters) {
           setInterpretedFilters(data.interpretedFilters as SearchFilters);
         }
@@ -268,33 +137,25 @@ export default function HomePage() {
         const apiCars: CarListing[] = (data.results ?? []).map(
           (raw: Record<string, unknown>, i: number) => normalizeApiCar(raw, i)
         );
-
-        // If Supabase has no data yet, fall back to client-side filtered sample cars
-        if (apiCars.length === 0) {
-          const fallback = clientSideFilter(SAMPLE_CARS, query);
-          setDisplayedCars(stampFavorites(fallback, favorites));
-        } else {
-          setDisplayedCars(stampFavorites(apiCars, favorites));
-        }
+        setDisplayedCars(apiCars);
       } catch (err) {
         console.error('Search error:', err);
         const message = err instanceof Error ? err.message : 'Search failed.';
         setSearchError(message);
         setInterpretedFilters(null);
-        // Still show client-side results so the page doesn't go blank
-        setDisplayedCars(stampFavorites(clientSideFilter(SAMPLE_CARS, query), favorites));
+        setDisplayedCars([]);
       } finally {
         setIsSearching(false);
       }
     },
-    [favorites, stampFavorites]
+    [favorites]
   );
 
   /* ── Quick-filter chip click ─────────────────────────────────── */
   const handleFilterClick = useCallback(
     (filter: QuickFilter) => {
       setSearchQuery(filter.query);
-      handleSearch(filter.query);
+      void handleSearch(filter.query);
     },
     [handleSearch]
   );
@@ -311,8 +172,6 @@ export default function HomePage() {
         ? prev.filter((id) => id !== car.id)
         : [...prev, car.id];
       localStorage.setItem('garilelo-favorites', JSON.stringify(next));
-      // Re-stamp the currently displayed list
-      setDisplayedCars((cars) => stampFavorites(cars, next));
       return next;
     });
   };
@@ -364,7 +223,7 @@ export default function HomePage() {
         )}
 
         <CarGrid
-          cars={displayedCars}
+          cars={carsWithFavorites}
           onViewDeal={handleViewDeal}
           onToggleFavorite={handleToggleFavorite}
           isLoading={isSearching}
@@ -376,38 +235,4 @@ export default function HomePage() {
   );
 }
 
-/* ── Client-side keyword filter (fallback when API has no data) ── */
-function clientSideFilter(cars: CarListing[], query: string): CarListing[] {
-  if (!query.trim()) return cars;
-  const q = query.toLowerCase();
 
-  const isUnder30L = /under\s*30/.test(q);
-  const isUnder50L = /under\s*50/.test(q);
-  const isAutomatic = q.includes('automatic') || q.includes('auto');
-  const isManual = q.includes('manual');
-  const isLowMileage = q.includes('low mileage') || q.includes('mileage');
-  const isFuelEco = q.includes('fuel efficient') || q.includes('efficient') || q.includes('economy');
-  const isSUV = q.includes('suv') || q.includes('prado') || q.includes('sportage');
-
-  return cars.filter((car) => {
-    if (isUnder30L && car.price > 3_000_000) return false;
-    if (isUnder50L && car.price > 5_000_000) return false;
-    if (isAutomatic && car.transmission !== 'Automatic') return false;
-    if (isManual && car.transmission !== 'Manual') return false;
-    if (isLowMileage && car.mileage > 30_000) return false;
-    if (isFuelEco && !['suzuki alto', 'suzuki cultus', 'suzuki swift'].some((m) => car.title.toLowerCase().includes(m))) return false;
-    if (isSUV && !['sportage', 'prado'].some((m) => car.title.toLowerCase().includes(m))) return false;
-
-    const cleanQ = q
-      .replace(/family\s*car|under\s*\d+\s*lac[s]?|under\s*\d+[lL]|automatic|manual|low\s*mileage|fuel\s*efficient|efficient|economy|suv|car/g, '')
-      .trim();
-    if (cleanQ) {
-      return (
-        car.title.toLowerCase().includes(cleanQ) ||
-        car.city.toLowerCase().includes(cleanQ) ||
-        car.source.toLowerCase().includes(cleanQ)
-      );
-    }
-    return true;
-  });
-}
