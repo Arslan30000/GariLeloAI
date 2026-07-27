@@ -39,6 +39,9 @@ export async function POST(req: Request) {
       model: 'gemini-2.5-flash',
       generationConfig: {
         responseMimeType: 'application/json',
+        // Disable thinking mode — otherwise thinking tokens corrupt the JSON output
+        // @ts-expect-error thinkingConfig is valid for gemini-2.5-flash but not in typedefs yet
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
 

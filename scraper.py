@@ -13,9 +13,9 @@ import json
 import asyncio
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from google import genai
+from google.genai import types as genai_types
 from supabase import create_client, Client
-import google.generativeai as genai
 from playwright.async_api import async_playwright, Page
 
 # ── Load env (works locally from .env.local; in CI vars are injected) ──
@@ -27,25 +27,39 @@ GEMINI_API_KEY       = os.environ["GEMINI_API_KEY"]
 
 # ── Clients ─────────────────────────────────────────────────────────────
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-genai.configure(api_key=GEMINI_API_KEY)
+_genai_client = genai.Client(api_key=GEMINI_API_KEY)
 
-PAGES_TO_SCRAPE = 5
-BASE_LIST_URL   = "https://www.pakwheels.com/used-cars/search/-/?sort=date"
-
-# ── Gemini response schema ───────────────────────────────────────────────
-class CarEvaluation(BaseModel):
-    ai_score: int        # 1–10 value-for-money score
-    ai_label: str        # "Great Deal" | "Good Deal" | "Fair Price" | "Overpriced"
-    ai_summary: str      # One engaging sentence
+PAGES_TO_SCRAPE   = 5
+GEMINI_BATCH_SIZE = 5   # cars per Gemini call — reduces API usage ~80%
+BASE_LIST_URL     = "https://www.pakwheels.com/used-cars/search/-/?sort=date"
 
 
 # ════════════════════════════════════════════════════════════════════════
 # HELPERS
 # ════════════════════════════════════════════════════════════════════════
 def _clean_int(text: str) -> int | None:
-    """'4,500 km' → 4500"""
+    """'4,500 km' -> 4500"""
     digits = re.sub(r"[^\d]", "", str(text))
     return int(digits) if digits else None
+
+
+def _parse_pkr(text: str) -> int:
+    """Parse PakWheels price text into full PKR integer.
+    Handles:
+      'PKR 64.75 Lac'  -> 6_475_000
+      'PKR 1.25 Crore' -> 12_500_000
+      'PKR 3,995,000'  -> 3_995_000
+      '3995000'        -> 3_995_000
+    """
+    t = text.strip().replace(",", "")
+    lac = re.search(r"([\d]+\.?\d*)\s*[Ll]ac", t)
+    if lac:
+        return int(float(lac.group(1)) * 100_000)
+    crore = re.search(r"([\d]+\.?\d*)\s*[Cc]r", t)
+    if crore:
+        return int(float(crore.group(1)) * 10_000_000)
+    # Plain digit string (already full PKR)
+    return _clean_int(t) or 0
 
 
 def _parse_url(url: str) -> dict:
@@ -85,36 +99,85 @@ async def _try_text(page: Page, *selectors: str, timeout: int = 5_000) -> str:
 
 
 # ════════════════════════════════════════════════════════════════════════
-# STEP 1 — Gemini AI evaluation
+# STEP 1 — Gemini AI batch evaluation
+# Evaluates up to GEMINI_BATCH_SIZE cars in a single API call.
+# Uses google-genai (new SDK) with thinking disabled for clean JSON output.
 # ════════════════════════════════════════════════════════════════════════
-async def evaluate_with_gemini(car: dict) -> dict:
-    print(f"  🧠 Evaluating {car.get('make')} {car.get('model')} "
-          f"{car.get('year')} @ PKR {car.get('price', 0):,} …")
+_FALLBACK_EVAL = {"ai_score": None, "ai_label": "Unevaluated", "ai_summary": "Analysis unavailable."}
 
-    model = genai.GenerativeModel("gemini-2.5-flash")
+
+async def evaluate_batch(cars: list[dict]) -> list[dict]:
+    """Send up to GEMINI_BATCH_SIZE cars to Gemini in one call.
+    Returns a list of dicts with ai_score, ai_label, ai_summary.
+    """
+    if not cars:
+        return []
+
+    print(f"  🧠 Batch-evaluating {len(cars)} car(s) with Gemini …")
+
+    # Build a compact representation — only send fields Gemini needs
+    slim = [
+        {
+            "index": i,
+            "make":  c.get("make"),
+            "model": c.get("model"),
+            "year":  c.get("year"),
+            "price": c.get("price"),
+            "mileage": c.get("mileage"),
+            "transmission": c.get("transmission"),
+            "fuel_type": c.get("fuel_type"),
+            "engine_capacity": c.get("engine_capacity"),
+            "city": c.get("city"),
+            "seller_description": (c.get("seller_description") or "")[:300],
+        }
+        for i, c in enumerate(cars)
+    ]
+
     prompt = f"""
-You are an expert Pakistani used-car evaluator. Analyse this listing:
+You are an expert Pakistani used-car evaluator. Analyse each listing below and rate it for value-for-money in the current Pakistani market.
 
-{json.dumps(car, indent=2, ensure_ascii=False)}
+Listings:
+{json.dumps(slim, indent=2, ensure_ascii=False)}
 
-Score it 1–10 for value-for-money in the current Pakistani market.
-Label it exactly as one of: "Great Deal", "Good Deal", "Fair Price", "Overpriced".
-Write ONE engaging sentence explaining your verdict (mention mileage, features, or price).
+For EACH listing return a JSON object with:
+- "index": the same index number
+- "ai_score": integer 1-10
+- "ai_label": exactly one of "Great Deal", "Good Deal", "Fair Price", "Overpriced"
+- "ai_summary": one engaging sentence (mention price, mileage, or key features)
 
-Respond ONLY with valid JSON: {{"ai_score": <int>, "ai_label": "<string>", "ai_summary": "<string>"}}
+Respond ONLY with a valid JSON array, e.g.:
+[{{"index":0,"ai_score":8,"ai_label":"Good Deal","ai_summary":"..."}}, ...]
 """
+
     try:
-        result = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
+        response = _genai_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=CarEvaluation,
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             ),
         )
-        return json.loads(result.text)
+        raw = response.text.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = re.sub(r"^```[a-z]*\n?", "", raw)
+            raw = re.sub(r"\n?```$", "", raw)
+        evaluations = json.loads(raw)
+        # Map by index
+        by_index = {e["index"]: e for e in evaluations}
+        return [
+            {
+                "ai_score":   by_index.get(i, {}).get("ai_score"),
+                "ai_label":   by_index.get(i, {}).get("ai_label", "Unevaluated"),
+                "ai_summary": by_index.get(i, {}).get("ai_summary", "Analysis unavailable."),
+            }
+            for i in range(len(cars))
+        ]
     except Exception as exc:
-        print(f"  ⚠️  Gemini failed: {exc}")
-        return {"ai_score": None, "ai_label": "Unevaluated", "ai_summary": "Analysis unavailable."}
+        print(f"  ⚠️  Gemini batch failed: {exc}")
+        return [_FALLBACK_EVAL] * len(cars)
+
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -145,10 +208,17 @@ async def scrape_listing(page: Page, url: str) -> dict | None:
         year  = int(ld.get("modelDate") or url_data.get("year") or 2020)
 
         # Price from JSON-LD offers block
+        # offers can be a dict OR a list — handle both
         price = 0
         try:
-            price = int(ld.get("offers", {}).get("price") or 0)
-        except (TypeError, ValueError):
+            offers = ld.get("offers", {})
+            if isinstance(offers, list):
+                offers = offers[0] if offers else {}
+            raw_price = offers.get("price")
+            if raw_price is not None:
+                # Could be int (3995000) or string ('3,995,000' or '64.75 Lac')
+                price = _parse_pkr(str(raw_price))
+        except (TypeError, ValueError, AttributeError):
             pass
 
         transmission_raw = ld.get("vehicleTransmission", "")
@@ -230,7 +300,7 @@ async def scrape_listing(page: Page, url: str) -> dict | None:
                 ".generic-white.fs18",          # price shown in gallery overlay
                 ".listing-price strong", ".car-price strong",
             )
-            price = _clean_int(price_raw) or 0
+            price = _parse_pkr(price_raw) if price_raw else 0
 
         print(f"  💰 price={price:,}  📏 mileage={mileage}")
 
@@ -385,50 +455,60 @@ async def run():
         print(f"\n✅ Total unique URLs collected: {len(all_urls)}\n")
 
         new_count = skipped_count = error_count = 0
+        pending: list[dict] = []   # scraped cars queued for batch AI eval
 
         for idx, url in enumerate(all_urls, 1):
             print(f"[{idx}/{len(all_urls)}] {url}")
 
-            # ── Deduplication ────────────────────────────────────────
+            # Deduplication
             try:
                 existing = supabase.table("cars").select("id").eq("url", url).execute()
                 if existing.data:
-                    print("  ⏩ Already in DB — skipping.")
+                    print("  Already in DB - skipping.")
                     skipped_count += 1
                     continue
             except Exception as exc:
-                print(f"  ⚠️  DB check failed: {exc}")
+                print(f"  DB check failed: {exc}")
 
-            # ── Scrape detail page ───────────────────────────────────
             car_data = await scrape_listing(page, url)
             if not car_data:
                 error_count += 1
-                continue
+            else:
+                pending.append(car_data)
 
-            # ── Gemini AI evaluation ─────────────────────────────────
-            ai_eval = await evaluate_with_gemini(car_data)
-
-            # ── Upsert to Supabase ───────────────────────────────────
-            payload = {**car_data, **ai_eval}
-            try:
-                supabase.table("cars").upsert(payload, on_conflict="url").execute()
-                print(
-                    f"  💾 Saved: {car_data['make']} {car_data['model']} "
-                    f"({car_data['year']}) — {ai_eval['ai_label']} ({ai_eval['ai_score']}/10)"
-                )
-                new_count += 1
-            except Exception as exc:
-                print(f"  ❌ DB insert failed: {exc}")
-                error_count += 1
-
-            # Polite delay between requests
             await asyncio.sleep(2)
 
         await browser.close()
 
-    # ── Garbage collection ───────────────────────────────────────────
+    print(f"\n{len(pending)} new car(s) scraped. Starting batch AI evaluation...\n")
+
+    # Phase 2: evaluate in batches of GEMINI_BATCH_SIZE (1 API call per batch)
+    for batch_start in range(0, len(pending), GEMINI_BATCH_SIZE):
+        batch = pending[batch_start : batch_start + GEMINI_BATCH_SIZE]
+        evaluations = await evaluate_batch(batch)
+
+        for car_data, ai_eval in zip(batch, evaluations):
+            payload = {**car_data, **ai_eval}
+            try:
+                supabase.table("cars").upsert(payload, on_conflict="url").execute()
+                print(
+                    f"  Saved: {car_data['make']} {car_data['model']} ({car_data['year']}) "
+                    f"- {ai_eval['ai_label']} ({ai_eval['ai_score']}/10)"
+                )
+                new_count += 1
+            except Exception as exc:
+                print(f"  DB insert failed: {exc}")
+                error_count += 1
+
+        # Pause between Gemini batches to respect rate limits
+        if batch_start + GEMINI_BATCH_SIZE < len(pending):
+            await asyncio.sleep(4)
+
     garbage_collect()
-    print(f"\n🏁 Done! New: {new_count} | Skipped: {skipped_count} | Errors: {error_count}")
+    gemini_calls = -(-len(pending) // GEMINI_BATCH_SIZE)
+    print(f"\nDone! New: {new_count} | Skipped: {skipped_count} | Errors: {error_count}")
+    print(f"Gemini API calls used this run: ~{gemini_calls}")
+
 
 
 if __name__ == "__main__":
