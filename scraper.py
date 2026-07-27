@@ -121,204 +121,176 @@ Respond ONLY with valid JSON: {{"ai_score": <int>, "ai_label": "<string>", "ai_s
 # STEP 2 — Scrape a single PakWheels listing page
 # ════════════════════════════════════════════════════════════════════════
 async def scrape_listing(page: Page, url: str) -> dict | None:
+    """Deep-scrape one PakWheels listing using JSON-LD + exact HTML selectors."""
     try:
-        # Use domcontentloaded — networkidle times out on ad-heavy pages
         await page.goto(url, wait_until="domcontentloaded", timeout=40_000)
-        # Give JS components a moment to render
         await page.wait_for_timeout(2_500)
 
-        # ── URL-based fallbacks (always available, never timeout) ─────
         url_data = _parse_url(url)
 
-        # ── Title: try known PakWheels selectors, fall back to URL ────
-        title_raw = await _try_text(
-            page,
-            "h1.car-heading",           # most listing pages
-            "h1.listing-car-title",     # some variants
-            ".car-heading h1",
-            "h1",                       # last resort
-        )
-        if title_raw:
-            # "Honda Civic 2022" → split off year
-            parts = title_raw.rsplit(" ", 1)
-            if parts[-1].isdigit() and len(parts[-1]) == 4:
-                make_model, year_str = " ".join(parts[:-1]), parts[-1]
-            else:
-                make_model, year_str = title_raw, str(url_data.get("year") or "")
-            make_parts = make_model.split(" ", 1)
-            make  = make_parts[0].strip()
-            model = make_parts[1].strip() if len(make_parts) > 1 else make_model
+        # ══════════════════════════════════════════════════════════════
+        # PRIMARY SOURCE: JSON-LD script tag
+        # PakWheels embeds all key data in <script type="application/ld+json">
+        # This is far more reliable than CSS selectors.
+        # ══════════════════════════════════════════════════════════════
+        ld = {}
+        try:
+            ld_text = await page.locator('script[type="application/ld+json"]').first.inner_text(timeout=5_000)
+            ld = json.loads(ld_text)
+        except Exception:
+            pass
+
+        make  = ld.get("manufacturer") or ld.get("brand", {}).get("name") or url_data.get("make", "Unknown")
+        model = ld.get("model") or url_data.get("model", "Unknown")
+        year  = int(ld.get("modelDate") or url_data.get("year") or 2020)
+
+        # Price from JSON-LD offers block
+        price = 0
+        try:
+            price = int(ld.get("offers", {}).get("price") or 0)
+        except (TypeError, ValueError):
+            pass
+
+        transmission_raw = ld.get("vehicleTransmission", "")
+        transmission = "Automatic" if "auto" in transmission_raw.lower() else "Manual"
+
+        color     = ld.get("color", "")
+        body_type = ld.get("bodyType", "")
+        fuel_type = ld.get("fuelType", "")
+
+        # Mileage: can be a plain string "165,000 km" OR a QuantitativeValue dict
+        mileage_raw = ld.get("mileageFromOdometer", "")
+        if isinstance(mileage_raw, dict):
+            # {"@type": "QuantitativeValue", "value": 165000, "unitCode": "KMT"}
+            mileage = _clean_int(str(mileage_raw.get("value", "")))
         else:
-            # Full fallback from URL slug
-            make  = url_data.get("make", "Unknown")
-            model = url_data.get("model", "Unknown")
-            year_str = str(url_data.get("year") or "2020")
+            mileage = _clean_int(mileage_raw)
 
-        year = _clean_int(year_str) or url_data.get("year") or 2020
-
-        # ── Price ─────────────────────────────────────────────────────
-        price_raw = await _try_text(
-            page,
-            ".price-box strong",
-            ".price-box h4",
-            ".price-box .price-amount",
-            ".listing-price strong",
-            ".car-price strong",
-        )
-        price = _clean_int(price_raw) or 0
-
-        # ── City ──────────────────────────────────────────────────────
-        city_raw = await _try_text(
-            page,
-            ".listing-location span",
-            ".seller-location span",
-            ".loc span",
-            ".listing-details .date-plate-wrap em",
-        )
-        city = city_raw or url_data.get("city", "")
-
-        # ── Spec table: try two common layouts ────────────────────────
-        specs: dict[str, str] = {}
-
-        # Layout A: <ul class="car-info"> <li>Key: Value</li> …
-        try:
-            rows = await page.locator("ul.car-info li").all()
-            for row in rows:
-                text = (await row.inner_text(timeout=3_000)).strip()
-                if ":" in text:
-                    k, _, v = text.partition(":")
-                    specs[k.strip().lower()] = v.strip()
-        except Exception:
-            pass
-
-        # Layout B: pairs of .title / .value inside .car-specs
-        try:
-            keys   = await page.locator(".car-specs .title").all()
-            values = await page.locator(".car-specs .value").all()
-            for k_el, v_el in zip(keys, values):
-                k = (await k_el.inner_text(timeout=2_000)).strip().lower()
-                v = (await v_el.inner_text(timeout=2_000)).strip()
-                if k and v:
-                    specs[k] = v
-        except Exception:
-            pass
-
-        # Layout C: dl > dt + dd  (some listing types)
-        try:
-            dts = await page.locator("dl dt").all()
-            dds = await page.locator("dl dd").all()
-            for dt_el, dd_el in zip(dts, dds):
-                k = (await dt_el.inner_text(timeout=2_000)).strip().lower()
-                v = (await dd_el.inner_text(timeout=2_000)).strip()
-                if k and v:
-                    specs[k] = v
-        except Exception:
-            pass
-
-        # ── Extract fields from specs (with sensible defaults) ────────
-        mileage_raw   = specs.get("mileage", specs.get("driven", ""))
-        engine_raw    = specs.get("engine capacity", specs.get("engine", ""))
-        transmission  = specs.get("transmission", "Manual").strip()
-        fuel_type     = specs.get("fuel type", specs.get("fuel", "Petrol")).strip()
-        assembly      = specs.get("assembly", "Local").strip()
-        color         = specs.get("color", specs.get("colour", "")).strip()
-        body_type     = specs.get("body type", specs.get("body", "")).strip()
-        registered_in = specs.get("registered in",
-                                   specs.get("registered areas", "")).strip()
-        year_spec     = specs.get("year", str(year))
-
-        mileage         = _clean_int(mileage_raw)
+        # Engine capacity: from engineDisplacement "1500cc" → 1500
+        engine_raw = ld.get("vehicleEngine", {}).get("engineDisplacement", "")
         engine_capacity = _clean_int(engine_raw)
-        # Override year from specs if present
-        year = _clean_int(year_spec) or year
-        # Normalise transmission
-        transmission = "Automatic" if "auto" in transmission.lower() else "Manual"
+
+        # ══════════════════════════════════════════════════════════════
+        # SECONDARY: HTML selectors for fields not in JSON-LD
+        # ══════════════════════════════════════════════════════════════
+
+        # ── City: "Karachi Sindh" → "Karachi" ─────────────────────────
+        city = ""
+        try:
+            city_raw = (await page.locator("p.detail-sub-heading a").first.inner_text(timeout=5_000)).strip()
+            # Strip province suffix (e.g. "Karachi Sindh" → "Karachi")
+            city = city_raw.split()[0] if city_raw else url_data.get("city", "")
+        except Exception:
+            city = url_data.get("city", "")
+
+        # ── ul.ul-featured: alternating li.ad-data / li pairs ─────────
+        # e.g. ["Registered In", "Karachi", "Color", "Blue", "Assembly", "Imported", ...]
+        registered_in = ""
+        assembly = ""
+        try:
+            all_lis = await page.locator("ul.ul-featured li").all()
+            texts = [(await li.inner_text(timeout=2_000)).strip() for li in all_lis]
+            # Walk pairs: texts[0]=key, texts[1]=value, texts[2]=key ...
+            for i in range(0, len(texts) - 1, 2):
+                key = texts[i].lower().rstrip(":")
+                val = texts[i + 1]
+                if "registered" in key:
+                    registered_in = val
+                elif "assembly" in key:
+                    assembly = val
+                elif "engine" in key and not engine_capacity:
+                    engine_capacity = _clean_int(val)
+                elif "body" in key and not body_type:
+                    body_type = val
+                elif "color" in key and not color:
+                    color = val
+        except Exception:
+            pass
+
+        # ── Spec table fallback (always visible, never lazy-loaded) ───
+        # <table class="table-engine-detail"> has year | mileage | fuel | transmission
+        try:
+            td_texts = [(await td.inner_text(timeout=2_000)).strip()
+                        for td in await page.locator("table.table-engine-detail td p").all()]
+            # order is: [year, mileage, fuel_type, transmission]
+            if len(td_texts) >= 2 and not mileage:
+                mileage = _clean_int(td_texts[1])  # "165,000 km" → 165000
+            if len(td_texts) >= 3 and not fuel_type:
+                fuel_type = td_texts[2]
+            if len(td_texts) >= 4 and not transmission_raw:
+                transmission = "Automatic" if "auto" in td_texts[3].lower() else "Manual"
+        except Exception:
+            pass
+
+        # ── Fallback price from page if JSON-LD had none ──────────────
+        if price == 0:
+            price_raw = await _try_text(
+                page,
+                ".price-box strong", ".price-box h4",
+                ".generic-white.fs18",          # price shown in gallery overlay
+                ".listing-price strong", ".car-price strong",
+            )
+            price = _clean_int(price_raw) or 0
+
+        print(f"  💰 price={price:,}  📏 mileage={mileage}")
 
         # ── Seller description ────────────────────────────────────────
-        description = await _try_text(
-            page,
-            ".seller-comments",
-            ".seller-comment",
-            ".comments",
-            ".description",
-            timeout=3_000,
-        )
+        description = ""
+        try:
+            desc_el = page.locator("#scroll_seller_comments ~ div, #scroll_seller_comments + div")
+            description = (await desc_el.first.inner_text(timeout=4_000)).strip()
+        except Exception:
+            description = await _try_text(page, ".seller-comments", ".comments", timeout=3_000)
 
-        # ── Images (up to 5) ─────────────────────────────────────────
-        # PakWheels lazy-loads images: the real URL lives in data-src,
-        # data-lazy, or data-original — NOT the src attribute.
-        # We scroll the page first to trigger the lazy-load observer.
+        # ══════════════════════════════════════════════════════════════
+        # IMAGES: read data-src from li.lslide elements — NOT img tags
+        # The <img> src is a base64 placeholder; the real URL is on the <li>
+        # ══════════════════════════════════════════════════════════════
         images: list[str] = []
         try:
-            # Scroll down a bit to wake up the lazy-load observer
-            await page.evaluate("window.scrollBy(0, 600)")
-            await page.wait_for_timeout(1_500)
-            await page.evaluate("window.scrollTo(0, 0)")
+            # li.lslide elements hold the full-res URL in data-src
+            slide_lis = await page.locator("ul.light-gallery li.lslide").all()
+            for li in slide_lis:
+                src = await li.get_attribute("data-src") or ""
+                # Skip PakWheels inspection pitch slides
+                if src and "cache" in src and src not in images:
+                    images.append(src)
+                if len(images) >= 5:
+                    break
 
-            # Candidate selectors from most to least specific
-            gallery_selectors = [
-                ".ad-gallery img",
-                ".gallery-thumb img",
-                ".owl-item img",
-                ".slick-slide img",
-                ".carousel-inner img",
-                ".fancybox-image",
-                "img[data-src]",       # any lazy-loaded img
-                "img[data-lazy]",
-                "img[data-original]",
-            ]
-
-            for sel in gallery_selectors:
-                img_els = await page.locator(sel).all()
-                for img in img_els:
-                    # Check all common lazy-load attributes, then fall back to src
-                    src = ""
-                    for attr in ("data-src", "data-lazy", "data-original",
-                                 "data-lazy-src", "src"):
-                        val = await img.get_attribute(attr) or ""
-                        if val.startswith("http"):
-                            src = val
-                            break
-
-                    # Only keep real car photos (filter out icons/placeholders)
-                    # PakWheels uses imgix CDN or their own cdn.pakwheels.com
-                    if not src:
-                        continue
-                    is_car_photo = any(domain in src for domain in [
-                        "pakwheels", "imgix", "cloudfront", "amazonaws",
-                        "imagin", "motorimage",
-                    ])
-                    is_tiny = "placeholder" in src.lower() or "logo" in src.lower()
-                    if is_car_photo and not is_tiny and src not in images:
+            # Fallback 1: any li with data-src containing "cache"
+            if not images:
+                all_lis = await page.locator("li[data-src]").all()
+                for li in all_lis:
+                    src = await li.get_attribute("data-src") or ""
+                    if "cache" in src and src not in images:
                         images.append(src)
                     if len(images) >= 5:
                         break
-                if images:
-                    break
 
-            # Last resort: grab any large img on the page with a photo-like URL
+            # Fallback 2: JSON-LD has the first image already
+            if not images and ld.get("image"):
+                images.append(ld["image"])
+
+            # Fallback 3: img tags with data-original (PakWheels attribute)
             if not images:
-                all_imgs = await page.locator("img").all()
-                for img in all_imgs:
-                    for attr in ("data-src", "data-lazy", "data-original", "src"):
-                        src = await img.get_attribute(attr) or ""
-                        if (src.startswith("http") and
-                                any(ext in src for ext in [".jpg", ".jpeg", ".webp", ".png"]) and
-                                "placeholder" not in src.lower() and
-                                "logo" not in src.lower() and
-                                src not in images):
-                            images.append(src)
-                            break
+                img_els = await page.locator("img[data-original]").all()
+                for img in img_els:
+                    src = await img.get_attribute("data-original") or ""
+                    if "cache" in src and src not in images:
+                        images.append(src)
                     if len(images) >= 5:
                         break
 
         except Exception as img_exc:
             print(f"  ⚠️  Image extraction failed: {img_exc}")
 
-        # Only save if we have the minimum required fields
-        if not make or price == 0:
-            print(f"  ⚠️  Skipping — could not extract make/price (make={make!r}, price={price})")
+        # Only skip if we couldn't even determine the make
+        if not make or make == "Unknown":
+            print(f"  ⚠️  Skipping — could not extract make")
             return None
+        if price == 0:
+            print(f"  ⚠️  Warning: price is 0 (may be Price on Call) — saving anyway")
 
         return {
             "url":                url,
