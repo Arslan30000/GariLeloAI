@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@supabase/supabase-js';
 import type { SearchFilters } from '../../types';
 
@@ -8,7 +8,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 /**
  * Strip markdown code-fences that Gemini sometimes wraps around JSON.
@@ -35,45 +35,53 @@ export async function POST(req: Request) {
     }
 
     // 1. Gemini: translate natural language -> structured JSON filters
+    // Using gemini-2.5-flash — 1 call per search so daily quota is not a concern.
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      generationConfig: {
+        responseMimeType: 'application/json',
+      },
+    });
+
     const prompt = `
       You are an expert car search assistant for the Pakistani used-car market.
       Extract structured search filters from this query: "${userQuery}"
 
       Return ONLY a valid JSON object with exactly these keys (null if not mentioned):
       {
-        "make": string | null,         // e.g. "Honda", "Toyota", "Suzuki", "Kia"
-        "model": string | null,        // e.g. "Civic", "Corolla", "Cultus", "Sportage"
-        "max_price": number | null,    // in PKR -- convert "40 lacs" -> 4000000, "1 crore" -> 10000000
-        "city": string | null,         // e.g. "Rawalpindi", "Islamabad", "Lahore", "Karachi"
-        "transmission": string | null, // STRICTLY "Automatic" or "Manual" only
-        "color": string | null         // e.g. "White", "Black", "Silver", "Red"
+        "make": string | null,
+        "model": string | null,
+        "max_price": number | null,
+        "city": string | null,
+        "transmission": string | null,
+        "color": string | null
       }
 
       Rules:
       - Output ONLY the JSON -- no markdown, no explanation.
       - Normalise make/model to proper case (e.g. "honda" -> "Honda").
-      - If the user says "auto" treat it as "Automatic".
-      - If the user says "Pindi" or "pindi" treat city as "Rawalpindi".
+      - max_price in PKR: "40 lacs" -> 4000000, "1 crore" -> 10000000.
+      - If the user says "auto" treat transmission as "Automatic".
+      - If the user says "Pindi" treat city as "Rawalpindi".
     `;
 
     let filters: SearchFilters;
     try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
-      const rawText = response.text ?? '';
+      const aiResult = await model.generateContent(prompt);
+      const rawText = aiResult.response.text();
       const sanitized = sanitizeGeminiJson(rawText);
       filters = JSON.parse(sanitized) as SearchFilters;
     } catch (geminiError) {
-      console.error('Gemini parse error:', geminiError);
-      return NextResponse.json(
-        { error: 'AI failed to parse the query. Please try rephrasing.' },
-        { status: 422 }
-      );
+      console.error('Gemini error:', geminiError);
+      // Fallback: return all cars with no filters rather than failing
+      filters = {
+        make: null,
+        model: null,
+        max_price: null,
+        city: null,
+        transmission: null,
+        color: null,
+      };
     }
 
     // 2. Supabase: dynamic query built from non-null filters
@@ -86,7 +94,7 @@ export async function POST(req: Request) {
     if (filters.transmission)      dbQuery = dbQuery.ilike('transmission', `%${filters.transmission}%`);
     if (filters.color)             dbQuery = dbQuery.ilike('color', `%${filters.color}%`);
 
-    // Sort: best AI-scored deals first, then cheapest. Exclude unevaluated.
+    // Sort: best AI-scored deals first, then by price. Exclude unevaluated cars.
     const { data: cars, error: dbError } = await dbQuery
       .not('ai_label', 'eq', 'Unevaluated')
       .not('ai_score', 'is', null)
