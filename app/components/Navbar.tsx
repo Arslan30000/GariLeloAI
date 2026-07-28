@@ -2,7 +2,18 @@
 
 import { useTheme } from './ThemeProvider';
 
-/* ── SVG icons (inline to avoid external deps) ──────────────────── */
+/* ── SVG icons ──────────────────────────────────────────────────── */
+
+function CarIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 17H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1l3-4h10l3 4h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2" />
+      <circle cx="7.5" cy="17" r="2.5" />
+      <circle cx="16.5" cy="17" r="2.5" />
+      <path d="M5 9h14" />
+    </svg>
+  );
+}
 
 function BookmarkIcon() {
   return (
@@ -45,51 +56,55 @@ function MoonIcon() {
   );
 }
 
-/* ── Navigation links config ────────────────────────────────────── */
-
-interface NavLink {
-  id: string;
-  label: string;
-  href: string;
-  icon: React.ReactNode;
-}
-
-const NAV_LINKS: NavLink[] = [
-  { id: 'saved', label: 'Saved Cars', href: '#saved', icon: <BookmarkIcon /> },
-  { id: 'trends', label: 'Market Trends', href: '#trends', icon: <TrendingIcon /> },
-];
-
 /* ── Component ──────────────────────────────────────────────────── */
 
-export default function Navbar() {
+interface NavbarProps {
+  activePage?: 'home' | 'saved' | 'trends';
+  onPageChange?: (page: 'home' | 'saved' | 'trends') => void;
+}
+
+export default function Navbar({ activePage = 'home', onPageChange }: NavbarProps) {
   const { theme, toggleTheme, mounted } = useTheme();
 
   return (
     <nav className="navbar" id="main-navbar">
       <div className="navbar-inner">
-        {/* ── Logo ─────────────────────────────────────────── */}
-        <a href="/" className="navbar-logo" id="navbar-logo">
+        {/* Logo */}
+        <button
+          className="navbar-logo"
+          id="navbar-logo"
+          onClick={() => onPageChange?.('home')}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+        >
           <div className="navbar-logo-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <CarIcon />
           </div>
           <span className="navbar-logo-text">
             GariLelo<span className="navbar-logo-ai">AI</span>
           </span>
-        </a>
+        </button>
 
-        {/* ── Links ────────────────────────────────────────── */}
+        {/* Links */}
         <div className="navbar-links">
-          {NAV_LINKS.map((link) => (
-            <a key={link.id} href={link.href} className="navbar-link" id={`nav-${link.id}`}>
-              {link.icon}
-              <span>{link.label}</span>
-            </a>
-          ))}
+          <button
+            className={`navbar-link ${activePage === 'saved' ? 'navbar-link--active' : ''}`}
+            id="nav-saved"
+            onClick={() => onPageChange?.(activePage === 'saved' ? 'home' : 'saved')}
+          >
+            <BookmarkIcon />
+            <span>Saved Cars</span>
+          </button>
+          <button
+            className={`navbar-link ${activePage === 'trends' ? 'navbar-link--active' : ''}`}
+            id="nav-trends"
+            onClick={() => onPageChange?.(activePage === 'trends' ? 'home' : 'trends')}
+          >
+            <TrendingIcon />
+            <span>Market Trends</span>
+          </button>
         </div>
 
-        {/* ── Theme toggle ─────────────────────────────────── */}
+        {/* Theme toggle */}
         <button
           onClick={toggleTheme}
           className="theme-toggle"

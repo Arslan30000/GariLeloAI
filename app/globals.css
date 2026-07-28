@@ -676,6 +676,20 @@ img {
   gap: 4px;
   font-size: 12px;
   color: var(--text-tertiary);
+  max-width: 100%;
+}
+
+/* City name truncation */
+.car-card-meta-city {
+  max-width: 90px;
+  overflow: hidden;
+}
+
+.meta-city-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
 }
 
 /* CTA button */
@@ -900,3 +914,172 @@ img {
   white-space: nowrap;
 }
 
+/* ── Navbar link as button ──────────────────────────────────────── */
+.navbar-link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.navbar-link--active {
+  color: var(--brand) !important;
+  background: var(--brand-bg) !important;
+}
+
+/* ── Page Panels (Saved Cars / Market Trends) ───────────────────── */
+.page-panel {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+.page-panel-header {
+  margin-bottom: 32px;
+}
+
+.page-panel-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.page-panel-subtitle {
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+
+/* ── Trends ─────────────────────────────────────────────────────── */
+.trends-stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.trends-stat-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: var(--shadow-sm);
+}
+
+.trends-stat-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.trends-stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--brand);
+  letter-spacing: -0.02em;
+}
+
+.trends-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.trends-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+}
+
+.trends-card--wide {
+  grid-column: 1 / -1;
+}
+
+.trends-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 18px;
+}
+
+.trends-deal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trends-deal-row {
+  display: grid;
+  grid-template-columns: 10px 110px 1fr 32px;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.trends-deal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.trends-deal-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.trends-deal-bar-wrap {
+  background: var(--border-subtle);
+  border-radius: 4px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.trends-deal-bar {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+  min-width: 4px;
+}
+
+.trends-deal-count {
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.trends-make-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.trends-make-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 120px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.trends-make-row:last-child {
+  border-bottom: none;
+}
+
+.trends-make-row--header {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

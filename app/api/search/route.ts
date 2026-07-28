@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import { createClient } from '@supabase/supabase-js';
 import type { SearchFilters } from '../../types';
 
@@ -8,11 +8,11 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 /**
  * Strip markdown code-fences that Gemini sometimes wraps around JSON.
- * e.g.  ```json\n{...}\n```  →  {...}
+ * e.g.  ```json\n{...}\n```  ->  {...}
  */
 function sanitizeGeminiJson(raw: string): string {
   return raw
@@ -34,17 +34,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 1. Gemini: translate natural language → structured JSON filters ─
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      generationConfig: {
-        responseMimeType: 'application/json',
-        // Disable thinking mode — otherwise thinking tokens corrupt the JSON output
-        // @ts-expect-error thinkingConfig is valid for gemini-2.5-flash but not in typedefs yet
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    });
-
+    // 1. Gemini: translate natural language -> structured JSON filters
     const prompt = `
       You are an expert car search assistant for the Pakistani used-car market.
       Extract structured search filters from this query: "${userQuery}"
@@ -53,23 +43,29 @@ export async function POST(req: Request) {
       {
         "make": string | null,         // e.g. "Honda", "Toyota", "Suzuki", "Kia"
         "model": string | null,        // e.g. "Civic", "Corolla", "Cultus", "Sportage"
-        "max_price": number | null,    // in PKR — convert "40 lacs" → 4000000, "1 crore" → 10000000
+        "max_price": number | null,    // in PKR -- convert "40 lacs" -> 4000000, "1 crore" -> 10000000
         "city": string | null,         // e.g. "Rawalpindi", "Islamabad", "Lahore", "Karachi"
         "transmission": string | null, // STRICTLY "Automatic" or "Manual" only
         "color": string | null         // e.g. "White", "Black", "Silver", "Red"
       }
 
       Rules:
-      - Output ONLY the JSON — no markdown, no explanation.
-      - Normalise make/model to proper case (e.g. "honda" → "Honda").
+      - Output ONLY the JSON -- no markdown, no explanation.
+      - Normalise make/model to proper case (e.g. "honda" -> "Honda").
       - If the user says "auto" treat it as "Automatic".
       - If the user says "Pindi" or "pindi" treat city as "Rawalpindi".
     `;
 
     let filters: SearchFilters;
     try {
-      const aiResult = await model.generateContent(prompt);
-      const rawText = aiResult.response.text();
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+        },
+      });
+      const rawText = response.text ?? '';
       const sanitized = sanitizeGeminiJson(rawText);
       filters = JSON.parse(sanitized) as SearchFilters;
     } catch (geminiError) {
@@ -80,7 +76,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 2. Supabase: dynamic query built from non-null filters ──────────
+    // 2. Supabase: dynamic query built from non-null filters
     let dbQuery = supabase.from('cars').select('*');
 
     if (filters.make)              dbQuery = dbQuery.ilike('make', `%${filters.make}%`);
@@ -90,8 +86,10 @@ export async function POST(req: Request) {
     if (filters.transmission)      dbQuery = dbQuery.ilike('transmission', `%${filters.transmission}%`);
     if (filters.color)             dbQuery = dbQuery.ilike('color', `%${filters.color}%`);
 
-    // Sort: best AI-scored deals first, then cheapest
+    // Sort: best AI-scored deals first, then cheapest. Exclude unevaluated.
     const { data: cars, error: dbError } = await dbQuery
+      .not('ai_label', 'eq', 'Unevaluated')
+      .not('ai_score', 'is', null)
       .order('ai_score', { ascending: false, nullsFirst: false })
       .order('price', { ascending: true })
       .limit(24);
@@ -104,7 +102,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 3. Return results + interpreted filters for AI feedback UI ──────
+    // 3. Return results + interpreted filters for AI feedback UI
     return NextResponse.json({
       interpretedFilters: filters,
       results: cars ?? [],

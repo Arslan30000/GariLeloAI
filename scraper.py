@@ -30,7 +30,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 _genai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 PAGES_TO_SCRAPE   = 5
-GEMINI_BATCH_SIZE = 5   # cars per Gemini call — reduces API usage ~80%
+GEMINI_BATCH_SIZE = 10  # 130 cars / 10 = 13 API calls — well within 1500/day free tier
 BASE_LIST_URL     = "https://www.pakwheels.com/used-cars/search/-/?sort=date"
 
 
@@ -100,8 +100,8 @@ async def _try_text(page: Page, *selectors: str, timeout: int = 5_000) -> str:
 
 # ════════════════════════════════════════════════════════════════════════
 # STEP 1 — Gemini AI batch evaluation
-# Evaluates up to GEMINI_BATCH_SIZE cars in a single API call.
-# Uses google-genai (new SDK) with thinking disabled for clean JSON output.
+# gemini-2.0-flash: 1,500 req/day free (vs 20/day for 2.5-flash)
+# Batch size 10: 130 cars = 13 API calls per run
 # ════════════════════════════════════════════════════════════════════════
 _FALLBACK_EVAL = {"ai_score": None, "ai_label": "Unevaluated", "ai_summary": "Analysis unavailable."}
 
@@ -113,7 +113,7 @@ async def evaluate_batch(cars: list[dict]) -> list[dict]:
     if not cars:
         return []
 
-    print(f"  🧠 Batch-evaluating {len(cars)} car(s) with Gemini …")
+    print(f"  Batch-evaluating {len(cars)} car(s) with Gemini ...")
 
     # Build a compact representation — only send fields Gemini needs
     slim = [
@@ -151,11 +151,10 @@ Respond ONLY with a valid JSON array, e.g.:
 
     try:
         response = _genai_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash",
             contents=prompt,
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
-                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
             ),
         )
         raw = response.text.strip()
@@ -175,7 +174,7 @@ Respond ONLY with a valid JSON array, e.g.:
             for i in range(len(cars))
         ]
     except Exception as exc:
-        print(f"  ⚠️  Gemini batch failed: {exc}")
+        print(f"  WARNING: Gemini batch failed: {exc}")
         return [_FALLBACK_EVAL] * len(cars)
 
 
@@ -302,7 +301,7 @@ async def scrape_listing(page: Page, url: str) -> dict | None:
             )
             price = _parse_pkr(price_raw) if price_raw else 0
 
-        print(f"  💰 price={price:,}  📏 mileage={mileage}")
+        print(f"  price={price:,}  mileage={mileage}")
 
         # ── Seller description ────────────────────────────────────────
         description = ""
@@ -353,14 +352,14 @@ async def scrape_listing(page: Page, url: str) -> dict | None:
                         break
 
         except Exception as img_exc:
-            print(f"  ⚠️  Image extraction failed: {img_exc}")
+            print(f"  WARNING: Image extraction failed: {img_exc}")
 
         # Only skip if we couldn't even determine the make
         if not make or make == "Unknown":
-            print(f"  ⚠️  Skipping — could not extract make")
+            print(f"  Skipping — could not extract make")
             return None
         if price == 0:
-            print(f"  ⚠️  Warning: price is 0 (may be Price on Call) — saving anyway")
+            print(f"  Warning: price is 0 (may be Price on Call) — saving anyway")
 
         return {
             "url":                url,
@@ -384,7 +383,7 @@ async def scrape_listing(page: Page, url: str) -> dict | None:
         }
 
     except Exception as exc:
-        print(f"  ❌ Failed to scrape {url}: {exc}")
+        print(f"  FAILED to scrape {url}: {exc}")
         return None
 
 
@@ -395,7 +394,7 @@ async def collect_listing_urls(page: Page, num_pages: int) -> list[str]:
     urls: list[str] = []
     for page_num in range(1, num_pages + 1):
         list_url = f"{BASE_LIST_URL}&page={page_num}"
-        print(f"📄 Collecting URLs from page {page_num}: {list_url}")
+        print(f"Collecting URLs from page {page_num}: {list_url}")
         for attempt in range(2):          # retry once on timeout
             try:
                 await page.goto(list_url, wait_until="domcontentloaded", timeout=40_000)
@@ -412,10 +411,10 @@ async def collect_listing_urls(page: Page, num_pages: int) -> list[str]:
                 break
             except Exception as exc:
                 if attempt == 0:
-                    print(f"  ⚠️  Retrying page {page_num} …")
+                    print(f"  Retrying page {page_num} ...")
                     await asyncio.sleep(3)
                 else:
-                    print(f"  ⚠️  Could not load list page {page_num}: {exc}")
+                    print(f"  WARNING: Could not load list page {page_num}: {exc}")
     return urls
 
 
@@ -427,16 +426,16 @@ def garbage_collect():
     try:
         result = supabase.table("cars").delete().lt("created_at", cutoff).execute()
         deleted = len(result.data) if result.data else 0
-        print(f"🗑️  Garbage collected {deleted} rows older than 60 days.")
+        print(f"Garbage collected {deleted} rows older than 60 days.")
     except Exception as exc:
-        print(f"  ⚠️  Garbage collection failed: {exc}")
+        print(f"  WARNING: Garbage collection failed: {exc}")
 
 
 # ════════════════════════════════════════════════════════════════════════
 # MAIN RUNNER
 # ════════════════════════════════════════════════════════════════════════
 async def run():
-    print("🚀 GariLelo AI Scraper starting…")
+    print("GariLelo AI Scraper starting...")
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)
@@ -452,7 +451,7 @@ async def run():
 
         # ── Collect URLs ─────────────────────────────────────────────
         all_urls = await collect_listing_urls(page, PAGES_TO_SCRAPE)
-        print(f"\n✅ Total unique URLs collected: {len(all_urls)}\n")
+        print(f"\nTotal unique URLs collected: {len(all_urls)}\n")
 
         new_count = skipped_count = error_count = 0
         pending: list[dict] = []   # scraped cars queued for batch AI eval
