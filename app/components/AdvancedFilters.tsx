@@ -8,6 +8,8 @@ interface AdvancedFiltersProps {
   onClose: () => void;
 }
 
+import { motion } from 'framer-motion';
+
 export default function AdvancedFilters({
   manualFilters,
   onFilterChange,
@@ -22,7 +24,13 @@ export default function AdvancedFilters({
   };
 
   return (
-    <div className="advanced-filters-panel">
+    <motion.div 
+      className="advanced-filters-panel"
+      initial={{ opacity: 0, y: -10, height: 0 }}
+      animate={{ opacity: 1, y: 0, height: 'auto' }}
+      exit={{ opacity: 0, y: -10, height: 0 }}
+      transition={{ duration: 0.3 }}
+    >
       <div className="af-header">
         <h3>Advanced Filters</h3>
         <button className="af-close-btn" onClick={onClose} aria-label="Close filters">
@@ -118,6 +126,6 @@ export default function AdvancedFilters({
       <div className="af-actions">
         <button className="af-btn-clear" onClick={handleClear}>Clear All</button>
       </div>
-    </div>
+    </motion.div>
   );
 }

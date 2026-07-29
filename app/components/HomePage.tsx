@@ -7,6 +7,7 @@ import CarGrid from './CarGrid';
 import CarCard from './CarCard';
 import Footer from './Footer';
 import AdvancedFilters from './AdvancedFilters';
+import { AnimatePresence } from 'framer-motion';
 import type { CarListing, QuickFilter, SearchFilters } from '../types';
 
 type ActivePage = 'home' | 'saved' | 'trends';
@@ -473,16 +474,18 @@ export default function HomePage() {
               </div>
             )}
 
-            {showAdvanced && (
-              <AdvancedFilters
-                manualFilters={manualFilters}
-                onFilterChange={(newFilters) => {
-                  setManualFilters(newFilters);
-                  if (hasSearched) handleSearch(searchQuery, newFilters);
-                }}
-                onClose={() => setShowAdvanced(false)}
-              />
-            )}
+            <AnimatePresence>
+              {showAdvanced && (
+                <AdvancedFilters
+                  manualFilters={manualFilters}
+                  onFilterChange={(newFilters) => {
+                    setManualFilters(newFilters);
+                    if (hasSearched) handleSearch(searchQuery, newFilters);
+                  }}
+                  onClose={() => setShowAdvanced(false)}
+                />
+              )}
+            </AnimatePresence>
 
             {/* AI Feedback Banner */}
             {filterChips.length > 0 && !isSearching && (

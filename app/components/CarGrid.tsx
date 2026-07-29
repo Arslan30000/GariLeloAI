@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { CarListing, SortOption } from '../types';
 import CarCard from './CarCard';
 
@@ -83,16 +84,27 @@ export default function CarGrid({
           <p>Our AI is analysing your query…</p>
         </div>
       ) : sorted.length > 0 ? (
-        <div className="car-grid" id="car-grid">
-          {sorted.map((car) => (
-            <CarCard
-              key={car.id}
-              car={car}
-              onViewDeal={onViewDeal}
-              onToggleFavorite={onToggleFavorite}
-            />
-          ))}
-        </div>
+        <motion.div 
+          className="car-grid" 
+          id="car-grid"
+          initial="hidden"
+          animate="visible"
+          variants={{
+            hidden: {},
+            visible: { transition: { staggerChildren: 0.1 } }
+          }}
+        >
+          <AnimatePresence mode="popLayout">
+            {sorted.map((car) => (
+              <CarCard
+                key={car.id}
+                car={car}
+                onViewDeal={onViewDeal}
+                onToggleFavorite={onToggleFavorite}
+              />
+            ))}
+          </AnimatePresence>
+        </motion.div>
       ) : hasSearched ? (
         <div className="car-grid-empty" id="car-grid-empty">
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">

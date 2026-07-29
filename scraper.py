@@ -259,12 +259,13 @@ async def scrape_listing(page: Page, url: str) -> dict | None:
         # SECONDARY: HTML selectors for fields not in JSON-LD
         # ══════════════════════════════════════════════════════════════
 
-        # ── City: "Karachi Sindh" → "Karachi" ─────────────────────────
+        # ── City: "Karachi Sindh" → "Karachi, Sindh" (no truncation) ──
         city = ""
         try:
             city_raw = (await page.locator("p.detail-sub-heading a").first.inner_text(timeout=5_000)).strip()
-            # Strip province suffix (e.g. "Karachi Sindh" → "Karachi")
-            city = city_raw.split()[0] if city_raw else url_data.get("city", "")
+            # Keep the full text instead of splitting by space, but replace spaces with commas if needed, 
+            # or just leave it as is. Pakwheels usually has "D.H.A. Karachi Sindh". We'll just take it as is.
+            city = city_raw if city_raw else url_data.get("city", "")
         except Exception:
             city = url_data.get("city", "")
 

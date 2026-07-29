@@ -1,6 +1,7 @@
 'use client';
 
 import type { CarListing } from '../types';
+import { motion } from 'framer-motion';
 
 interface CarCardProps {
   car: CarListing;
@@ -89,7 +90,19 @@ export default function CarCard({ car, onViewDeal, onToggleFavorite }: CarCardPr
   const handleFav = () => onToggleFavorite?.(car);
 
   return (
-    <article className="car-card" id={`car-${car.id}`}>
+    <motion.article 
+      className="car-card" 
+      id={`car-${car.id}`}
+      layout
+      variants={{
+        hidden: { opacity: 0, y: 30, scale: 0.95 },
+        visible: { opacity: 1, y: 0, scale: 1, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+      }}
+      initial="hidden"
+      animate="visible"
+      exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+      whileHover={{ y: -8, transition: { duration: 0.2 } }}
+    >
       {/* Image area */}
       <div className="car-card-image">
         {car.imageUrl ? (
@@ -195,6 +208,6 @@ export default function CarCard({ car, onViewDeal, onToggleFavorite }: CarCardPr
           </svg>
         </a>
       </div>
-    </article>
+    </motion.article>
   );
 }
