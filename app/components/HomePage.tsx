@@ -476,10 +476,9 @@ export default function HomePage() {
             {showAdvanced && (
               <AdvancedFilters
                 manualFilters={manualFilters}
-                setManualFilters={setManualFilters}
-                onApply={() => {
-                  setShowAdvanced(false);
-                  if (hasSearched) handleSearch(searchQuery);
+                onFilterChange={(newFilters) => {
+                  setManualFilters(newFilters);
+                  if (hasSearched) handleSearch(searchQuery, newFilters);
                 }}
                 onClose={() => setShowAdvanced(false)}
               />

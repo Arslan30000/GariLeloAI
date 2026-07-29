@@ -1,37 +1,24 @@
 'use client';
 
-import { useState } from 'react';
 import type { SearchFilters } from '../types';
 
 interface AdvancedFiltersProps {
   manualFilters: Partial<SearchFilters>;
-  setManualFilters: (filters: Partial<SearchFilters>) => void;
-  onApply: () => void;
+  onFilterChange: (filters: Partial<SearchFilters>) => void;
   onClose: () => void;
 }
 
 export default function AdvancedFilters({
   manualFilters,
-  setManualFilters,
-  onApply,
+  onFilterChange,
   onClose,
 }: AdvancedFiltersProps) {
-  // Local state for sliders/inputs before they are applied
-  const [localFilters, setLocalFilters] = useState<Partial<SearchFilters>>(manualFilters);
-
   const handleUpdate = (key: keyof SearchFilters, value: any) => {
-    setLocalFilters((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const handleApply = () => {
-    setManualFilters(localFilters);
-    onApply();
+    onFilterChange({ ...manualFilters, [key]: value });
   };
 
   const handleClear = () => {
-    setLocalFilters({});
-    setManualFilters({});
-    onApply();
+    onFilterChange({});
   };
 
   return (
@@ -51,7 +38,7 @@ export default function AdvancedFilters({
         <div className="af-group">
           <label>Max Price (PKR)</label>
           <select
-            value={localFilters.max_price || ''}
+            value={manualFilters.max_price || ''}
             onChange={(e) => handleUpdate('max_price', e.target.value ? Number(e.target.value) : null)}
             className="af-select"
           >
@@ -68,7 +55,7 @@ export default function AdvancedFilters({
         <div className="af-group">
           <label>Body Type</label>
           <select
-            value={localFilters.body_type || ''}
+            value={manualFilters.body_type || ''}
             onChange={(e) => handleUpdate('body_type', e.target.value || null)}
             className="af-select"
           >
@@ -90,11 +77,11 @@ export default function AdvancedFilters({
               type="range"
               min="0"
               max="10"
-              value={localFilters.ai_score_min || 0}
+              value={manualFilters.ai_score_min || 0}
               onChange={(e) => handleUpdate('ai_score_min', Number(e.target.value))}
               className="af-slider"
             />
-            <span className="af-slider-val">{localFilters.ai_score_min || 'Any'}</span>
+            <span className="af-slider-val">{manualFilters.ai_score_min || 'Any'}</span>
           </div>
         </div>
 
@@ -102,7 +89,7 @@ export default function AdvancedFilters({
         <div className="af-group">
           <label>Min Engine Capacity (cc)</label>
           <select
-            value={localFilters.engine_capacity || ''}
+            value={manualFilters.engine_capacity || ''}
             onChange={(e) => handleUpdate('engine_capacity', e.target.value ? Number(e.target.value) : null)}
             className="af-select"
           >
@@ -119,7 +106,7 @@ export default function AdvancedFilters({
           <label className="af-checkbox-label">
             <input
               type="checkbox"
-              checked={localFilters.include_call_for_price === true}
+              checked={manualFilters.include_call_for_price === true}
               onChange={(e) => handleUpdate('include_call_for_price', e.target.checked ? true : null)}
             />
             Include "Call for Price" (Price = 0) listings
@@ -129,8 +116,7 @@ export default function AdvancedFilters({
       </div>
 
       <div className="af-actions">
-        <button className="af-btn-clear" onClick={handleClear}>Clear</button>
-        <button className="af-btn-apply" onClick={handleApply}>Apply Filters</button>
+        <button className="af-btn-clear" onClick={handleClear}>Clear All</button>
       </div>
     </div>
   );
