@@ -114,6 +114,11 @@ html.dark {
   --source-other-text: #cbd5e1;
 }
 
+html.dark option {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
 /* ── Reset & Base ──────────────────────────────────────────────── */
 *,
 *::before,
@@ -367,6 +372,9 @@ img {
   background: transparent;
   color: var(--text-primary);
   min-width: 0;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .search-bar-input::placeholder {

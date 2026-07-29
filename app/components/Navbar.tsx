@@ -71,14 +71,28 @@ export default function Navbar({ activePage = 'home', onPageChange }: NavbarProp
           className="navbar-logo"
           id="navbar-logo"
           onClick={() => onPageChange?.('home')}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: '12px' }}
         >
-          <div className="navbar-logo-icon">
-            <CarIcon />
+          <svg width="42" height="42" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4" y="4" width="92" height="92" fill="#5b85ff" stroke="#000" strokeWidth="8" />
+            <path d="M35 96 V50 C35 35 45 25 70 22 H96 V96 Z" fill="#FFF" stroke="#000" strokeWidth="8" strokeLinejoin="round" />
+            <path d="M42 50 C48 40 58 35 70 35 H96 V50 Z" fill="#fff" stroke="#000" strokeWidth="6" strokeLinejoin="round" />
+            <path d="M42 50 C48 40 58 35 70 35 H96" fill="none" stroke="#000" strokeWidth="6" />
+            <ellipse cx="26" cy="46" rx="10" ry="6" fill="#000" />
+            <path d="M38 65 Q55 60 96 60" fill="none" stroke="#000" strokeWidth="6" />
+            <path d="M42 58 Q52 55 65 58" fill="none" stroke="#000" strokeWidth="8" strokeLinecap="round" />
+            <path d="M42 80 Q60 85 96 80" fill="none" stroke="#000" strokeWidth="6" />
+            <path d="M50 96 V82 Q50 72 65 72 Q80 72 80 82 V96" fill="#000" />
+            <rect x="76" y="22" width="8" height="74" fill="#5b85ff" />
+          </svg>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }}>
+            <span style={{ fontSize: '20px', fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '0.5px', lineHeight: 1.1 }}>
+              GariLeloAi
+            </span>
+            <span style={{ fontSize: '9.5px', fontWeight: 700, color: 'var(--text-tertiary)', letterSpacing: '1.2px', marginTop: '1px' }}>
+              CAR BUYING, SIMPLIFIED
+            </span>
           </div>
-          <span className="navbar-logo-text">
-            GariLelo<span className="navbar-logo-ai">AI</span>
-          </span>
         </button>
 
         {/* Links */}

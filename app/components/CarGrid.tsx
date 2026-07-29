@@ -116,8 +116,8 @@ export default function CarGrid({
       ) : (
         <div className="car-grid-empty" id="car-grid-welcome">
           <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
-            <path d="M19 17H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1l2-3h8l2 3h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2z"/>
-            <circle cx="12" cy="12" r="2.5"/>
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
           <p>Type anything above to find your perfect car.</p>
           <p style={{ fontSize: '13px', opacity: 0.6, marginTop: 4 }}>
