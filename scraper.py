@@ -13,8 +13,7 @@ import json
 import asyncio
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types as genai_types
+from groq import Groq
 from supabase import create_client, Client
 from playwright.async_api import async_playwright, Page
 
@@ -23,14 +22,15 @@ load_dotenv(".env.local")
 
 SUPABASE_URL         = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-GEMINI_API_KEY       = os.environ["GEMINI_API_KEY"]
+GROQ_API_KEY         = os.environ["GROQ_API_KEY"]
 
 # ── Clients ─────────────────────────────────────────────────────────────
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-_genai_client = genai.Client(api_key=GEMINI_API_KEY)
+_groq_client = Groq(api_key=GROQ_API_KEY)
 
 PAGES_TO_SCRAPE   = 5
-GEMINI_BATCH_SIZE = 10  # 130 cars / 10 = 13 API calls — well within 1500/day free tier
+BATCH_SIZE = 10  # Groq allows high limits, batching 10 per request
+
 BASE_LIST_URL     = "https://www.pakwheels.com/used-cars/search/-/?sort=date"
 
 
@@ -99,21 +99,19 @@ async def _try_text(page: Page, *selectors: str, timeout: int = 5_000) -> str:
 
 
 # ════════════════════════════════════════════════════════════════════════
-# STEP 1 — Gemini AI batch evaluation
-# gemini-2.0-flash: 1,500 req/day free (vs 20/day for 2.5-flash)
-# Batch size 10: 130 cars = 13 API calls per run
+# STEP 1 — AI batch evaluation (Groq Llama-3.3-70b-versatile)
 # ════════════════════════════════════════════════════════════════════════
 _FALLBACK_EVAL = {"ai_score": None, "ai_label": "Unevaluated", "ai_summary": "Analysis unavailable."}
 
 
 async def evaluate_batch(cars: list[dict]) -> list[dict]:
-    """Send up to GEMINI_BATCH_SIZE cars to Gemini in one call.
+    """Send up to BATCH_SIZE cars to Groq in one call.
     Returns a list of dicts with ai_score, ai_label, ai_summary.
     """
     if not cars:
         return []
 
-    print(f"  Batch-evaluating {len(cars)} car(s) with Gemini ...")
+    print(f"  Batch-evaluating {len(cars)} car(s) with Groq ...")
 
     # Build a compact representation — only send fields Gemini needs
     slim = [
@@ -134,37 +132,55 @@ async def evaluate_batch(cars: list[dict]) -> list[dict]:
     ]
 
     prompt = f"""
-You are an expert Pakistani used-car evaluator. Analyse each listing below and rate it for value-for-money in the current Pakistani market.
+You are an expert Pakistani used-car evaluator. Analyse each listing and rate value-for-money in the current Pakistani market.
 
 Listings:
 {json.dumps(slim, indent=2, ensure_ascii=False)}
 
+IMPORTANT: If price is 0 or missing, this means "Call for Price" (price withheld by seller).
+In this case:
+- Estimate the realistic market price in PKR based on make, model, year, mileage, and fuel_type.
+- Set ai_score based on the ESTIMATED price compared to market averages.
+- Start ai_summary with "Est. market price ~PKR X Lac — " then your analysis.
+
 For EACH listing return a JSON object with:
 - "index": the same index number
-- "ai_score": integer 1-10
+- "ai_score": integer 1-10 (value-for-money; use estimated price for Call for Price cars)
 - "ai_label": exactly one of "Great Deal", "Good Deal", "Fair Price", "Overpriced"
-- "ai_summary": one engaging sentence (mention price, mileage, or key features)
+- "ai_summary": one engaging sentence in English. For Call for Price cars, start with the estimated price range.
 
-Respond ONLY with a valid JSON array, e.g.:
-[{{"index":0,"ai_score":8,"ai_label":"Good Deal","ai_summary":"..."}}, ...]
+Pakistani market context (mid-2025 approximate prices):
+- Suzuki Alto 2020-2024: 20-30 Lac
+- Honda City 2020-2024: 35-55 Lac
+- Toyota Corolla 2020-2024: 45-75 Lac
+- Honda Civic 2020-2024: 55-75 Lac
+- Toyota Fortuner 2020-2024: 90-140 Lac
+- KIA Sportage 2020-2024: 60-85 Lac
+- Hyundai Tucson 2020-2024: 65-90 Lac
+
+Respond ONLY with a valid JSON object containing an "evaluations" array:
+{{
+  "evaluations": [
+    {{"index":0,"ai_score":8,"ai_label":"Good Deal","ai_summary":"..."}}
+  ]
+}}
 """
 
     try:
-        response = _genai_client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                response_mime_type="application/json",
-            ),
+        response = _groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are a car evaluation AI that returns strict JSON objects."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
         )
-        raw = response.text.strip()
-        # Strip markdown code fences if present
-        if raw.startswith("```"):
-            raw = re.sub(r"^```[a-z]*\n?", "", raw)
-            raw = re.sub(r"\n?```$", "", raw)
-        evaluations = json.loads(raw)
+        raw = response.choices[0].message.content.strip()
+        data = json.loads(raw)
+        evaluations = data.get("evaluations", [])
+        
         # Map by index
-        by_index = {e["index"]: e for e in evaluations}
+        by_index = {e["index"]: e for e in evaluations if "index" in e}
         return [
             {
                 "ai_score":   by_index.get(i, {}).get("ai_score"),
@@ -174,7 +190,7 @@ Respond ONLY with a valid JSON array, e.g.:
             for i in range(len(cars))
         ]
     except Exception as exc:
-        print(f"  WARNING: Gemini batch failed: {exc}")
+        print(f"  WARNING: Groq batch failed: {exc}")
         return [_FALLBACK_EVAL] * len(cars)
 
 
@@ -481,9 +497,9 @@ async def run():
 
     print(f"\n{len(pending)} new car(s) scraped. Starting batch AI evaluation...\n")
 
-    # Phase 2: evaluate in batches of GEMINI_BATCH_SIZE (1 API call per batch)
-    for batch_start in range(0, len(pending), GEMINI_BATCH_SIZE):
-        batch = pending[batch_start : batch_start + GEMINI_BATCH_SIZE]
+    # Phase 2: evaluate in batches of BATCH_SIZE (1 API call per batch)
+    for batch_start in range(0, len(pending), BATCH_SIZE):
+        batch = pending[batch_start : batch_start + BATCH_SIZE]
         evaluations = await evaluate_batch(batch)
 
         for car_data, ai_eval in zip(batch, evaluations):
@@ -499,14 +515,14 @@ async def run():
                 print(f"  DB insert failed: {exc}")
                 error_count += 1
 
-        # Pause between Gemini batches to respect rate limits
-        if batch_start + GEMINI_BATCH_SIZE < len(pending):
-            await asyncio.sleep(4)
+        # Pause between Groq batches to respect rate limits
+        if batch_start + BATCH_SIZE < len(pending):
+            await asyncio.sleep(2)
 
     garbage_collect()
-    gemini_calls = -(-len(pending) // GEMINI_BATCH_SIZE)
+    api_calls = -(-len(pending) // BATCH_SIZE)
     print(f"\nDone! New: {new_count} | Skipped: {skipped_count} | Errors: {error_count}")
-    print(f"Gemini API calls used this run: ~{gemini_calls}")
+    print(f"Groq API calls used this run: ~{api_calls}")
 
 
 

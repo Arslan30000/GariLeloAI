@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Groq from 'groq-sdk';
 import { createClient } from '@supabase/supabase-js';
 import type { SearchFilters } from '../../types';
 
@@ -8,19 +8,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-
-/**
- * Strip markdown code-fences that Gemini sometimes wraps around JSON.
- * e.g.  ```json\n{...}\n```  ->  {...}
- */
-function sanitizeGeminiJson(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '')
-    .trim();
-}
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! });
 
 export async function POST(req: Request) {
   try {
@@ -28,74 +16,131 @@ export async function POST(req: Request) {
     const userQuery: string = body?.userQuery ?? '';
 
     if (!userQuery.trim()) {
-      return NextResponse.json(
-        { error: 'userQuery is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'userQuery is required' }, { status: 400 });
     }
 
-    // 1. Gemini: translate natural language -> structured JSON filters
-    // Using gemini-2.5-flash — 1 call per search so daily quota is not a concern.
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      generationConfig: {
-        responseMimeType: 'application/json',
-      },
-    });
-
+    // ── 1. Groq (Llama 3): translate natural language → structured JSON filters ─
     const prompt = `
-      You are an expert car search assistant for the Pakistani used-car market.
-      Extract structured search filters from this query: "${userQuery}"
+You are an expert car search assistant for the Pakistani used-car market.
+Extract structured search filters from this query: "${userQuery}"
 
-      Return ONLY a valid JSON object with exactly these keys (null if not mentioned):
-      {
-        "make": string | null,
-        "model": string | null,
-        "max_price": number | null,
-        "city": string | null,
-        "transmission": string | null,
-        "color": string | null
-      }
+Return ONLY a valid JSON object with exactly these keys (null if not mentioned):
+{
+  "make": string | null,
+  "model": string | null,
+  "min_price": number | null,
+  "max_price": number | null,
+  "min_year": number | null,
+  "max_year": number | null,
+  "city": string | null,
+  "transmission": string | null,
+  "color": string | null,
+  "body_type": string | null,
+  "fuel_type": string | null,
+  "engine_capacity": number | null,
+  "ai_score_min": number | null,
+  "keyword_search": string | null,
+  "include_call_for_price": boolean | null
+}
 
-      Rules:
-      - Output ONLY the JSON -- no markdown, no explanation.
-      - Normalise make/model to proper case (e.g. "honda" -> "Honda").
-      - max_price in PKR: "40 lacs" -> 4000000, "1 crore" -> 10000000.
-      - If the user says "auto" treat transmission as "Automatic".
-      - If the user says "Pindi" treat city as "Rawalpindi".
-    `;
+Field rules:
+- make/model: proper case (e.g. "honda" → "Honda", "civic" → "Civic")
+- prices in PKR: "40 lacs" → 4000000, "1 crore" → 10000000
+- transmission: ONLY "Automatic" or "Manual" — null otherwise
+- body_type: map vehicle category words → EXACTLY one of: "Van", "SUV", "Sedan", "Hatchback", "Pickup", "Crossover", "Wagon", "Minivan", "MPV", "Coupe"
+  Examples: "van" → "Van", "family car" → "Minivan" or "SUV"
+- fuel_type: map to EXACTLY one of: "Petrol", "Diesel", "Hybrid", "Electric", "CNG"
+- city: "Pindi" → "Rawalpindi", "Isb" → "Islamabad", "Khi" → "Karachi", "Lhr" → "Lahore"
+- engine_capacity: if user wants "fast cars", set this to 1800 or 2000.
+- keyword_search: if the query has semantic terms like "fast", "luxury", "reliable", "family", output that keyword here.
+- include_call_for_price: if the user explicitly asks for "luxury cars" or doesn't mention a price, set to true. If they set a max_price (e.g., "under 30 lac"), set this to STRICTLY false so we don't show price=0 cars.
+
+Pakistani van/minivan brands to know: Suzuki Bolan, Toyota HiAce, Nissan Vanette, Daihatsu Hijet
+When user says "van" set body_type to "Van" and leave make/model null unless specified.
+
+Output ONLY the JSON object. Do not include markdown formatting or explanations.
+`;
 
     let filters: SearchFilters;
+    let geminiOk = true; // Kept variable name for frontend compatibility
     try {
-      const aiResult = await model.generateContent(prompt);
-      const rawText = aiResult.response.text();
-      const sanitized = sanitizeGeminiJson(rawText);
-      filters = JSON.parse(sanitized) as SearchFilters;
-    } catch (geminiError) {
-      console.error('Gemini error:', geminiError);
-      // Fallback: return all cars with no filters rather than failing
+      const response = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: 'You are a car search assistant. You output strict JSON objects.' },
+          { role: 'user', content: prompt }
+        ],
+        response_format: { type: 'json_object' }
+      });
+
+      const rawText = response.choices[0]?.message?.content?.trim() || '{}';
+      filters = JSON.parse(rawText) as SearchFilters;
+    } catch (apiError) {
+      console.error('Groq API error in search route:', apiError);
+      geminiOk = false;
+      // Basic fallback
+      const words = userQuery.trim().split(/\s+/);
       filters = {
-        make: null,
-        model: null,
+        make: words[0] ? words[0].charAt(0).toUpperCase() + words[0].slice(1).toLowerCase() : null,
+        model: words[1] ? words[1].charAt(0).toUpperCase() + words[1].slice(1).toLowerCase() : null,
+        min_price: null,
         max_price: null,
+        min_year: null,
+        max_year: null,
         city: null,
         transmission: null,
         color: null,
+        body_type: null,
+        fuel_type: null,
+        engine_capacity: null,
+        ai_score_min: null,
+        keyword_search: null,
+        include_call_for_price: null,
       };
     }
 
-    // 2. Supabase: dynamic query built from non-null filters
-    let dbQuery = supabase.from('cars').select('*');
+    // ── Merge manual JSON overrides from body if they exist ──────────────
+    if (body?.manualFilters) {
+      filters = { ...filters, ...body.manualFilters };
+    }
 
-    if (filters.make)              dbQuery = dbQuery.ilike('make', `%${filters.make}%`);
-    if (filters.model)             dbQuery = dbQuery.ilike('model', `%${filters.model}%`);
-    if (filters.max_price != null) dbQuery = dbQuery.lte('price', filters.max_price);
-    if (filters.city)              dbQuery = dbQuery.ilike('city', `%${filters.city}%`);
-    if (filters.transmission)      dbQuery = dbQuery.ilike('transmission', `%${filters.transmission}%`);
-    if (filters.color)             dbQuery = dbQuery.ilike('color', `%${filters.color}%`);
+    // ── 2. Supabase: dynamic query built from non-null filters ──────────
+    const applyFilters = (q: any) => {
+      if (filters.make)              q = q.ilike('make', `%${filters.make}%`);
+      if (filters.model)             q = q.ilike('model', `%${filters.model}%`);
+      
+      if (filters.max_price != null) {
+        q = q.lte('price', filters.max_price);
+        if (filters.include_call_for_price === false) {
+          q = q.gt('price', 0);
+        }
+      }
+      if (filters.min_price != null) {
+        q = q.gte('price', filters.min_price);
+      }
+      
+      if (filters.min_year != null)  q = q.gte('year', filters.min_year);
+      if (filters.max_year != null)  q = q.lte('year', filters.max_year);
+      
+      if (filters.city)              q = q.ilike('city', `%${filters.city}%`);
+      if (filters.transmission)      q = q.ilike('transmission', `%${filters.transmission}%`);
+      if (filters.color)             q = q.ilike('color', `%${filters.color}%`);
+      if (filters.body_type)         q = q.ilike('body_type', `%${filters.body_type}%`);
+      if (filters.fuel_type)         q = q.ilike('fuel_type', `%${filters.fuel_type}%`);
+      
+      if (filters.engine_capacity != null) q = q.gte('engine_capacity', filters.engine_capacity);
+      if (filters.ai_score_min != null)    q = q.gte('ai_score', filters.ai_score_min);
+      
+      if (filters.keyword_search) {
+        // Search the keyword in either the seller description or the AI summary
+        q = q.or(`seller_description.ilike.%${filters.keyword_search}%,ai_summary.ilike.%${filters.keyword_search}%`);
+      }
+      
+      return q;
+    };
 
-    // Sort: best AI-scored deals first, then by price. Exclude unevaluated cars.
-    const { data: cars, error: dbError } = await dbQuery
+    // Sort: best AI-scored deals first, then cheapest. Show unevaluated only if no rated results.
+    const { data: ratedCars, error: dbError } = await applyFilters(supabase.from('cars').select('*'))
       .not('ai_label', 'eq', 'Unevaluated')
       .not('ai_score', 'is', null)
       .order('ai_score', { ascending: false, nullsFirst: false })
@@ -110,10 +155,20 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. Return results + interpreted filters for AI feedback UI
+    // If no rated cars found, widen to include unevaluated as fallback
+    let cars = ratedCars ?? [];
+    if (cars.length === 0) {
+      const { data: allCars } = await applyFilters(supabase.from('cars').select('*'))
+        .order('price', { ascending: true })
+        .limit(24);
+      cars = allCars ?? [];
+    }
+
+
     return NextResponse.json({
       interpretedFilters: filters,
-      results: cars ?? [],
+      geminiOk,
+      results: cars,
     });
 
   } catch (error) {

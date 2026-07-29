@@ -48,10 +48,19 @@ export interface QuickFilter {
 export interface SearchFilters {
   make: string | null;
   model: string | null;
+  min_price: number | null;
   max_price: number | null;
+  min_year: number | null;
+  max_year: number | null;
   city: string | null;
   transmission: 'Automatic' | 'Manual' | null;
   color: string | null;
+  body_type: string | null;   // e.g. "Van", "SUV", "Sedan", "Hatchback"
+  fuel_type: string | null;   // e.g. "Hybrid", "Diesel", "Petrol"
+  engine_capacity: number | null; // Minimum CC, e.g. 1800
+  ai_score_min: number | null; // 1-10
+  keyword_search: string | null; // For semantic searches like "fast"
+  include_call_for_price: boolean | null; // Strictly false for low budget searches
 }
 
 // ── Sort options ─────────────────────────────────────────────────

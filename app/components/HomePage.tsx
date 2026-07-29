@@ -6,6 +6,7 @@ import Hero from './Hero';
 import CarGrid from './CarGrid';
 import CarCard from './CarCard';
 import Footer from './Footer';
+import AdvancedFilters from './AdvancedFilters';
 import type { CarListing, QuickFilter, SearchFilters } from '../types';
 
 type ActivePage = 'home' | 'saved' | 'trends';
@@ -318,6 +319,10 @@ export default function HomePage() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [interpretedFilters, setInterpretedFilters] = useState<SearchFilters | null>(null);
+  
+  // Manual Filters State
+  const [manualFilters, setManualFilters] = useState<Partial<SearchFilters>>({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   /* Load saved state from localStorage */
   useEffect(() => {
@@ -339,7 +344,8 @@ export default function HomePage() {
 
   /* API search */
   const handleSearch = useCallback(
-    async (query: string) => {
+    async (query: string, filtersOverride?: Partial<SearchFilters>) => {
+      const filtersToUse = filtersOverride ?? manualFilters;
       if (!query.trim()) {
         setDisplayedCars([]);
         setHasSearched(false);
@@ -357,7 +363,7 @@ export default function HomePage() {
         const res = await fetch('/api/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userQuery: query }),
+          body: JSON.stringify({ userQuery: query, manualFilters: filtersToUse }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error ?? `Server error (${res.status})`);
@@ -375,7 +381,7 @@ export default function HomePage() {
         setIsSearching(false);
       }
     },
-    []
+    [manualFilters]
   );
 
   /* Quick filter */
@@ -419,6 +425,7 @@ export default function HomePage() {
           const labels: Record<string, string> = {
             make: 'Make', model: 'Model', max_price: 'Max Price',
             city: 'City', transmission: 'Transmission', color: 'Color',
+            body_type: 'Body Type', fuel_type: 'Fuel',
           };
           const val = k === 'max_price'
             ? `Under PKR ${Number(v).toLocaleString('en-PK')}`
@@ -449,6 +456,34 @@ export default function HomePage() {
               onFilterClick={handleFilterClick}
               isSearching={isSearching}
             />
+            
+            {!showAdvanced && !isSearching && (
+              <div style={{ textAlign: 'center', marginTop: '-1.5rem', marginBottom: '2rem', position: 'relative', zIndex: 10 }}>
+                <button 
+                  onClick={() => setShowAdvanced(true)}
+                  style={{
+                    background: 'var(--bg-surface)', border: '1px solid var(--border)', 
+                    padding: '0.5rem 1rem', borderRadius: 'var(--radius-full)',
+                    fontSize: '0.9rem', color: 'var(--text-secondary)', cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgb(0 0 0 / 0.05)'
+                  }}
+                >
+                  + Advanced Filters
+                </button>
+              </div>
+            )}
+
+            {showAdvanced && (
+              <AdvancedFilters
+                manualFilters={manualFilters}
+                setManualFilters={setManualFilters}
+                onApply={() => {
+                  setShowAdvanced(false);
+                  if (hasSearched) handleSearch(searchQuery);
+                }}
+                onClose={() => setShowAdvanced(false)}
+              />
+            )}
 
             {/* AI Feedback Banner */}
             {filterChips.length > 0 && !isSearching && (
