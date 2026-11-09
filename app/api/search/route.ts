@@ -4,11 +4,15 @@ import { createClient } from '@supabase/supabase-js';
 import type { SearchFilters } from '../../types';
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 );
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY! });
+const getGroqClient = () => {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) return null;
+  return new Groq({ apiKey });
+};
 
 export async function POST(req: Request) {
   try {
@@ -64,7 +68,12 @@ Output ONLY the JSON object. Do not include markdown formatting or explanations.
     let filters: SearchFilters;
     let geminiOk = true; // Kept variable name for frontend compatibility
     try {
-      const response = await groq.chat.completions.create({
+      const groqClient = getGroqClient();
+      if (!groqClient) {
+        throw new Error('GROQ_API_KEY is not configured');
+      }
+
+      const response = await groqClient.chat.completions.create({
         model: 'llama-3.3-70b-versatile',
         messages: [
           { role: 'system', content: 'You are a car search assistant. You output strict JSON objects.' },

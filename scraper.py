@@ -20,9 +20,12 @@ from playwright.async_api import async_playwright, Page
 # ── Load env (works locally from .env.local; in CI vars are injected) ──
 load_dotenv(".env.local")
 
-SUPABASE_URL         = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
-SUPABASE_SERVICE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-GROQ_API_KEY         = os.environ["GROQ_API_KEY"]
+SUPABASE_URL         = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "").strip('"\' ')
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip('"\' ')
+GROQ_API_KEY         = os.environ.get("GROQ_API_KEY", "").strip('"\' ')
+
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY environment variable is missing or empty. Please set it in .env.local or GitHub Secrets.")
 
 # ── Clients ─────────────────────────────────────────────────────────────
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
